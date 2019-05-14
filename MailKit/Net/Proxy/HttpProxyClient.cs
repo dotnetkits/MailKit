@@ -1,5 +1,5 @@
 ﻿//
-// Socks4Client.cs
+// HttpProxyClient.cs
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
@@ -34,20 +34,18 @@ using System.Threading.Tasks;
 namespace MailKit.Net.Proxy
 {
 	/// <summary>
-	/// A SOCKS4 proxy client.
+	/// An HTTP proxy client.
 	/// </summary>
 	/// <remarkas>
-	/// A SOCKS4 proxy client.
+	/// An HTTP proxy client.
 	/// </remarkas>
-	public class Socks4Client : SocksClient
+	public class HttpProxyClient : ProxyClient
 	{
-		static readonly byte[] InvalidIPAddress = { 0, 0, 0, 1 };
-
 		/// <summary>
-		/// Initializes a new instance of the <see cref="T:MailKit.Net.Socks4Client"/> class.
+		/// Initializes a new instance of the <see cref="T:MailKit.Net.HttpProxyClient"/> class.
 		/// </summary>
 		/// <remarks>
-		/// Initializes a new instance of the <see cref="T:MailKit.Net.Socks4Client"/> class.
+		/// Initializes a new instance of the <see cref="T:MailKit.Net.HttpProxyClient"/> class.
 		/// </remarks>
 		/// <param name="host">The host name of the proxy server.</param>
 		/// <param name="port">The proxy server port.</param>
@@ -62,15 +60,15 @@ namespace MailKit.Net.Proxy
 		/// <para>-or-</para>
 		/// <para>The length of <paramref name="host"/> is greater than 255 characters.</para>
 		/// </exception>
-		public Socks4Client (string host, int port) : base (4, host, port)
+		public HttpProxyClient (string host, int port) : base (host, port)
 		{
 		}
 
 		/// <summary>
-		/// Initializes a new instance of the <see cref="T:MailKit.Net.Socks4Client"/> class.
+		/// Initializes a new instance of the <see cref="T:MailKit.Net.HttpProxyClient"/> class.
 		/// </summary>
 		/// <remarks>
-		/// Initializes a new instance of the <see cref="T:MailKit.Net.Socks4Client"/> class.
+		/// Initializes a new instance of the <see cref="T:MailKit.Net.HttpProxyClient"/> class.
 		/// </remarks>
 		/// <param name="host">The host name of the proxy server.</param>
 		/// <param name="port">The proxy server port.</param>
@@ -84,141 +82,92 @@ namespace MailKit.Net.Proxy
 		/// <paramref name="port"/> is not between <c>1</c> and <c>65535</c>.
 		/// </exception>
 		/// <exception cref="System.ArgumentException">
-		/// The <paramref name="host"/> is a zero-length string.
+		/// <para>The <paramref name="host"/> is a zero-length string.</para>
+		/// <para>-or-</para>
+		/// <para>The length of <paramref name="host"/> is greater than 255 characters.</para>
 		/// </exception>
-		public Socks4Client (string host, int port, NetworkCredential credentials) : base (4, host, port, credentials)
+		public HttpProxyClient (string host, int port, NetworkCredential credentials) : base (host, port, credentials)
 		{
-		}
-
-		/// <summary>
-		/// Get or set whether this <see cref="T:MailKit.Net.Proxy.Socks4Client"/> is a Socks4a client.
-		/// </summary>
-		/// <remarks>
-		/// Gets or sets whether this <see cref="T:MailKit.Net.Proxy.Socks4Client"/> is a Socks4a client.
-		/// </remarks>
-		/// <value><c>true</c> if is is a Socks4a client; otherwise, <c>false</c>.</value>
-		protected bool IsSocks4a {
-			get; set;
-		}
-
-		enum Socks4Command : byte
-		{
-			Connect = 0x01,
-			Bind    = 0x02,
-		}
-
-		enum Socks4Reply : byte
-		{
-			RequestGranted        = 0x5a,
-			RequestRejected       = 0x5b,
-			RequestFailedNoIdentd = 0x5c,
-			RequestFailedWrongId  = 0x5d
-		}
-
-		static string GetFailureReason (byte reply)
-		{
-			switch ((Socks4Reply) reply) {
-			case Socks4Reply.RequestRejected:       return "Request rejected or failed.";
-			case Socks4Reply.RequestFailedNoIdentd: return "Request failed; unable to contact client machine's identd service.";
-			case Socks4Reply.RequestFailedWrongId:  return "Request failed; client ID does not match specified username.";
-			default:                                return "Unknown error.";
-			}
-		}
-
-		async Task<IPAddress> ResolveAsync (string host, bool doAsync, CancellationToken cancellationToken)
-		{
-			IPAddress[] ipAddresses;
-
-			if (doAsync) {
-				ipAddresses = await Dns.GetHostAddressesAsync (host).ConfigureAwait (false);
-			} else {
-#if NETSTANDARD
-				ipAddresses = Dns.GetHostAddressesAsync (host).GetAwaiter ().GetResult ();
-#else
-				ipAddresses = Dns.GetHostAddresses (host);
-#endif
-			}
-
-			for (int i = 0; i < ipAddresses.Length; i++) {
-				if (ipAddresses[i].AddressFamily == AddressFamily.InterNetwork)
-					return ipAddresses[i];
-			}
-
-			throw new ArgumentException ($"Could not resolve a suitable IPv4 address for '{host}'.", nameof (host));
 		}
 
 		async Task<Socket> ConnectAsync (string host, int port, bool doAsync, CancellationToken cancellationToken)
 		{
-			byte[] addr, domain = null;
-			IPAddress ip;
-
 			ValidateArguments (host, port);
-
-			if (!IPAddress.TryParse (host, out ip)) {
-				if (IsSocks4a) {
-					domain = Encoding.UTF8.GetBytes (host);
-					addr = InvalidIPAddress;
-				} else {
-					ip = await ResolveAsync (host, doAsync, cancellationToken).ConfigureAwait (false);
-					addr = ip.GetAddressBytes ();
-				}
-			} else {
-				if (ip.AddressFamily != AddressFamily.InterNetwork)
-					throw new ArgumentException ("The specified host address must be IPv4.", nameof (host));
-
-				addr = ip.GetAddressBytes ();
-			}
 
 			cancellationToken.ThrowIfCancellationRequested ();
 
 			var socket = await SocketUtils.ConnectAsync (ProxyHost, ProxyPort, LocalEndPoint, doAsync, cancellationToken).ConfigureAwait (false);
-			var user = ProxyCredentials != null ? Encoding.UTF8.GetBytes (ProxyCredentials.UserName) : new byte[0];
+			var builder = new StringBuilder ();
+
+			builder.AppendFormat ("CONNECT {0}:{1} HTTP/1.1\r\n", host, port);
+			builder.AppendFormat ("Host: {0}:{1}\r\n", host, port);
+			if (ProxyCredentials != null) {
+				var token = Encoding.UTF8.GetBytes (string.Format ("{0}:{1}", ProxyCredentials.UserName, ProxyCredentials.Password));
+				var base64 = Convert.ToBase64String (token);
+				builder.AppendFormat ("Proxy-Authorization: Basic {0}\r\n", base64);
+			}
+			builder.Append ("\r\n");
+
+			var command = Encoding.UTF8.GetBytes (builder.ToString ());
 
 			try {
-				// +----+-----+----------+----------+----------+-------+--------------+-------+
-				// |VER | CMD | DST.PORT | DST.ADDR |  USERID  | NULL  |  DST.DOMAIN  | NULL  |
-				// +----+-----+----------+----------+----------+-------+--------------+-------+
-				// | 1  |  1  |    2     |    4     | VARIABLE | X'00' |   VARIABLE   | X'00' |
-				// +----+-----+----------+----------+----------+-------+--------------+-------+
-				int bufferSize = 9 + user.Length + (domain != null ? domain.Length + 1 : 0);
-				var buffer = new byte[bufferSize];
-				int nread, n = 0;
+				await SendAsync (socket, command, 0, command.Length, doAsync, cancellationToken).ConfigureAwait (false);
 
-				buffer[n++] = (byte) SocksVersion;
-				buffer[n++] = (byte) Socks4Command.Connect;
-				buffer[n++] = (byte)(port >> 8);
-				buffer[n++] = (byte) port;
-				Buffer.BlockCopy (addr, 0, buffer, n, 4);
-				n += 4;
-				Buffer.BlockCopy (user, 0, buffer, n, user.Length);
-				n += user.Length;
-				buffer[n++] = 0x00;
-				if (domain != null) {
-					Buffer.BlockCopy (domain, 0, buffer, n, domain.Length);
-					n += domain.Length;
-					buffer[n++] = 0x00;
+				var buffer = new byte[1024];
+				var endOfHeaders = false;
+				var newline = false;
+
+				builder.Clear ();
+
+				// read until we consume the end of the headers (it's ok if we read some of the content)
+				do {
+					int nread = await ReceiveAsync (socket, buffer, 0, buffer.Length, doAsync, cancellationToken).ConfigureAwait (false);
+
+					if (nread > 0) {
+						int n = nread;
+
+						for (int i = 0; i < nread && !endOfHeaders; i++) {
+							switch ((char) buffer[i]) {
+							case '\r':
+								break;
+							case '\n':
+								endOfHeaders = newline;
+								newline = true;
+
+								if (endOfHeaders)
+									n = i + 1;
+								break;
+							default:
+								newline = false;
+								break;
+							}
+						}
+
+						builder.Append (Encoding.UTF8.GetString (buffer, 0, n));
+					}
+				} while (!endOfHeaders);
+
+				int index = 0;
+
+				while (builder[index] != '\n')
+					index++;
+
+				if (index > 0 && builder[index - 1] == '\r')
+					index--;
+
+				// trim everything beyond the "HTTP/1.1 200 ..." part of the response
+				builder.Length = index;
+
+				var response = builder.ToString ();
+
+				if (response.Length >= 16 && response.StartsWith ("HTTP/1.", StringComparison.OrdinalIgnoreCase) &&
+					(response[7] == '1' || response[7] == '0') && response[8] == ' ' &&
+					response[9] == '2' && response[10] == '0' && response[11] == '0' &&
+					response[12] == ' ') {
+					return socket;
 				}
 
-				await SendAsync (socket, buffer, 0, n, doAsync, cancellationToken).ConfigureAwait (false);
-
-				// +-----+-----+----------+----------+
-				// | VER | REP | BND.PORT | BND.ADDR |
-				// +-----+-----+----------+----------+
-				// |  1  |  1  |    2     |    4     |
-				// +-----+-----+----------+----------+
-				n = 0;
-
-				do {
-					if ((nread = await ReceiveAsync (socket, buffer, 0 + n, 8 - n, doAsync, cancellationToken).ConfigureAwait (false)) > 0)
-						n += nread;
-				} while (n < 8);
-
-				if (buffer[1] != (byte) Socks4Reply.RequestGranted)
-					throw new ProxyProtocolException (string.Format ("Failed to connect to {0}:{1}: {2}", host, port, GetFailureReason (buffer[1])));
-
-				// TODO: do we care about BND.ADDR and BND.PORT?
-
-				return socket;
+				throw new ProxyProtocolException (string.Format ("Failed to connect to {0}:{1}: {2}", host, port, response));
 			} catch {
 #if NETSTANDARD_2_0 || NET_4_5 || __MOBILE__
 				if (socket.Connected)

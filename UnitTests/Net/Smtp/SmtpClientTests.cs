@@ -1293,17 +1293,41 @@ namespace UnitTests.Net.Smtp {
 					Assert.Fail ("Did not expect an exception in Authenticate: {0}", ex);
 				}
 
+				MailboxAddress vrfy = null;
+
 				try {
-					client.Verify ("Smith");
+					vrfy = client.Verify ("Smith");
 				} catch (Exception ex) {
 					Assert.Fail ("Did not expect an exception in Verify: {0}", ex);
 				}
 
+				Assert.NotNull (vrfy, "VRFY result");
+				Assert.AreEqual ("Fred Smith", vrfy.Name, "VRFY name");
+				Assert.AreEqual ("Smith@USC-ISIF.ARPA", vrfy.Address, "VRFY address");
+
+				InternetAddressList expn = null;
+
 				try {
-					client.Expand ("Example-People");
+					expn = client.Expand ("Example-People");
 				} catch (Exception ex) {
 					Assert.Fail ("Did not expect an exception in Expand: {0}", ex);
 				}
+
+				Assert.NotNull (expn, "EXPN result");
+				Assert.AreEqual (6, expn.Count, "EXPN count");
+				Assert.AreEqual ("Jon Postel", expn[0].Name, "expn[0].Name");
+				Assert.AreEqual ("Postel@USC-ISIF.ARPA", ((MailboxAddress) expn[0]).Address, "expn[0].Address");
+				Assert.AreEqual ("Fred Fonebone", expn[1].Name, "expn[1].Name");
+				Assert.AreEqual ("Fonebone@USC-ISIQ.ARPA", ((MailboxAddress) expn[1]).Address, "expn[1].Address");
+				Assert.AreEqual ("Sam Q. Smith", expn[2].Name, "expn[2].Name");
+				Assert.AreEqual ("SQSmith@USC-ISIQ.ARPA", ((MailboxAddress) expn[2]).Address, "expn[2].Address");
+				Assert.AreEqual ("Quincy Smith", expn[3].Name, "expn[3].Name");
+				Assert.AreEqual ("USC-ISIF.ARPA", ((MailboxAddress) expn[3]).Route[0], "expn[3].Route");
+				Assert.AreEqual ("Q-Smith@ISI-VAXA.ARPA", ((MailboxAddress) expn[3]).Address, "expn[3].Address");
+				Assert.AreEqual ("", expn[4].Name, "expn[4].Name");
+				Assert.AreEqual ("joe@foo-unix.ARPA", ((MailboxAddress) expn[4]).Address, "expn[4].Address");
+				Assert.AreEqual ("", expn[5].Name, "expn[5].Name");
+				Assert.AreEqual ("xyz@bar-unix.ARPA", ((MailboxAddress) expn[5]).Address, "expn[5].Address");
 
 				try {
 					client.NoOp ();
@@ -1417,17 +1441,41 @@ namespace UnitTests.Net.Smtp {
 					Assert.Fail ("Did not expect an exception in Authenticate: {0}", ex);
 				}
 
+				MailboxAddress vrfy = null;
+
 				try {
-					await client.VerifyAsync ("Smith");
+					vrfy = await client.VerifyAsync ("Smith");
 				} catch (Exception ex) {
 					Assert.Fail ("Did not expect an exception in Verify: {0}", ex);
 				}
 
+				Assert.NotNull (vrfy, "VRFY result");
+				Assert.AreEqual ("Fred Smith", vrfy.Name, "VRFY name");
+				Assert.AreEqual ("Smith@USC-ISIF.ARPA", vrfy.Address, "VRFY address");
+
+				InternetAddressList expn = null;
+
 				try {
-					await client.ExpandAsync ("Example-People");
+					expn = await client.ExpandAsync ("Example-People");
 				} catch (Exception ex) {
 					Assert.Fail ("Did not expect an exception in Expand: {0}", ex);
 				}
+
+				Assert.NotNull (expn, "EXPN result");
+				Assert.AreEqual (6, expn.Count, "EXPN count");
+				Assert.AreEqual ("Jon Postel", expn[0].Name, "expn[0].Name");
+				Assert.AreEqual ("Postel@USC-ISIF.ARPA", ((MailboxAddress) expn[0]).Address, "expn[0].Address");
+				Assert.AreEqual ("Fred Fonebone", expn[1].Name, "expn[1].Name");
+				Assert.AreEqual ("Fonebone@USC-ISIQ.ARPA", ((MailboxAddress) expn[1]).Address, "expn[1].Address");
+				Assert.AreEqual ("Sam Q. Smith", expn[2].Name, "expn[2].Name");
+				Assert.AreEqual ("SQSmith@USC-ISIQ.ARPA", ((MailboxAddress) expn[2]).Address, "expn[2].Address");
+				Assert.AreEqual ("Quincy Smith", expn[3].Name, "expn[3].Name");
+				Assert.AreEqual ("USC-ISIF.ARPA", ((MailboxAddress) expn[3]).Route[0], "expn[3].Route");
+				Assert.AreEqual ("Q-Smith@ISI-VAXA.ARPA", ((MailboxAddress) expn[3]).Address, "expn[3].Address");
+				Assert.AreEqual ("", expn[4].Name, "expn[4].Name");
+				Assert.AreEqual ("joe@foo-unix.ARPA", ((MailboxAddress) expn[4]).Address, "expn[4].Address");
+				Assert.AreEqual ("", expn[5].Name, "expn[5].Name");
+				Assert.AreEqual ("xyz@bar-unix.ARPA", ((MailboxAddress) expn[5]).Address, "expn[5].Address");
 
 				try {
 					await client.NoOpAsync ();
@@ -2338,6 +2386,11 @@ namespace UnitTests.Net.Smtp {
 
 		class DsnSmtpClient : SmtpClient
 		{
+			public DsnSmtpClient ()
+			{
+				DeliveryStatusNotificationType = DeliveryStatusNotificationType.HeadersOnly;
+			}
+
 			protected override string GetEnvelopeId (MimeMessage message)
 			{
 				var id = base.GetEnvelopeId (message);
@@ -2363,7 +2416,7 @@ namespace UnitTests.Net.Smtp {
 			var message = CreateEightBitMessage ();
 			message.MessageId = MimeUtils.GenerateMessageId ();
 
-			var mailFrom = string.Format ("MAIL FROM:<sender@example.com> BODY=8BITMIME ENVID={0}\r\n", message.MessageId);
+			var mailFrom = string.Format ("MAIL FROM:<sender@example.com> BODY=8BITMIME ENVID={0} RET=HDRS\r\n", message.MessageId);
 
 			var commands = new List<SmtpReplayCommand> ();
 			commands.Add (new SmtpReplayCommand ("", "comcast-greeting.txt"));
@@ -2427,7 +2480,7 @@ namespace UnitTests.Net.Smtp {
 			var message = CreateEightBitMessage ();
 			message.MessageId = MimeUtils.GenerateMessageId ();
 
-			var mailFrom = string.Format ("MAIL FROM:<sender@example.com> BODY=8BITMIME ENVID={0}\r\n", message.MessageId);
+			var mailFrom = string.Format ("MAIL FROM:<sender@example.com> BODY=8BITMIME ENVID={0} RET=HDRS\r\n", message.MessageId);
 
 			var commands = new List<SmtpReplayCommand> ();
 			commands.Add (new SmtpReplayCommand ("", "comcast-greeting.txt"));
@@ -2482,6 +2535,153 @@ namespace UnitTests.Net.Smtp {
 				}
 
 				Assert.IsFalse (client.IsConnected, "Failed to disconnect");
+			}
+		}
+
+		class CustomSmtpClient : SmtpClient
+		{
+			public SmtpResponse SendCommand (string command)
+			{
+				return SendCommand (command, CancellationToken.None);
+			}
+
+			public Task<SmtpResponse> SendCommandAsync (string command)
+			{
+				return SendCommandAsync (command, CancellationToken.None);
+			}
+		}
+
+		[Test]
+		public void TestCustomCommand ()
+		{
+			var commands = new List<SmtpReplayCommand> ();
+			commands.Add (new SmtpReplayCommand ("", "comcast-greeting.txt"));
+			commands.Add (new SmtpReplayCommand ("EHLO unit-tests.mimekit.org\r\n", "comcast-ehlo.txt"));
+			commands.Add (new SmtpReplayCommand ("VRFY Smith\r\n", "rfc0821-vrfy.txt"));
+			commands.Add (new SmtpReplayCommand ("EXPN Example-People\r\n", "rfc0821-expn.txt"));
+
+			using (var client = new CustomSmtpClient ()) {
+				client.LocalDomain = "unit-tests.mimekit.org";
+
+				Assert.Throws<ServiceNotConnectedException> (() => client.SendCommand ("COMMAND"));
+
+				try {
+					client.ReplayConnect ("localhost", new SmtpReplayStream (commands, false));
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Connect: {0}", ex);
+				}
+
+				Assert.IsTrue (client.IsConnected, "Client failed to connect.");
+				Assert.IsFalse (client.IsSecure, "IsSecure should be false.");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.Authentication), "Failed to detect AUTH extension");
+				Assert.IsTrue (client.AuthenticationMechanisms.Contains ("LOGIN"), "Failed to detect the LOGIN auth mechanism");
+				Assert.IsTrue (client.AuthenticationMechanisms.Contains ("PLAIN"), "Failed to detect the PLAIN auth mechanism");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.EightBitMime), "Failed to detect 8BITMIME extension");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.EnhancedStatusCodes), "Failed to detect ENHANCEDSTATUSCODES extension");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.Size), "Failed to detect SIZE extension");
+				Assert.AreEqual (36700160, client.MaxSize, "Failed to parse SIZE correctly");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.StartTLS), "Failed to detect STARTTLS extension");
+
+				Assert.Throws<ArgumentException> (() => client.Capabilities |= SmtpCapabilities.UTF8);
+
+				Assert.AreEqual (120000, client.Timeout, "Timeout");
+				client.Timeout *= 2;
+
+				Assert.Throws<ArgumentNullException> (() => client.SendCommand (null));
+
+				SmtpResponse response = null;
+
+				try {
+					response = client.SendCommand ("VRFY Smith");
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Verify: {0}", ex);
+				}
+
+				Assert.NotNull (response, "VRFY result");
+				Assert.AreEqual (SmtpStatusCode.Ok, response.StatusCode, "VRFY response code");
+				Assert.AreEqual ("Fred Smith <Smith@USC-ISIF.ARPA>", response.Response, "VRFY response");
+
+				try {
+					response = client.SendCommand ("EXPN Example-People");
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Expand: {0}", ex);
+				}
+
+				Assert.NotNull (response, "EXPN result");
+				Assert.AreEqual (SmtpStatusCode.Ok, response.StatusCode, "EXPN response code");
+				Assert.AreEqual ("Jon Postel <Postel@USC-ISIF.ARPA>\nFred Fonebone <Fonebone@USC-ISIQ.ARPA>\nSam Q. Smith <SQSmith@USC-ISIQ.ARPA>\nQuincy Smith <@USC-ISIF.ARPA:Q-Smith@ISI-VAXA.ARPA>\n<joe@foo-unix.ARPA>\n<xyz@bar-unix.ARPA>", response.Response, "EXPN response");
+			}
+		}
+
+		[Test]
+		public async Task TestCustomCommandAsync ()
+		{
+			var commands = new List<SmtpReplayCommand> ();
+			commands.Add (new SmtpReplayCommand ("", "comcast-greeting.txt"));
+			commands.Add (new SmtpReplayCommand ("EHLO unit-tests.mimekit.org\r\n", "comcast-ehlo.txt"));
+			commands.Add (new SmtpReplayCommand ("VRFY Smith\r\n", "rfc0821-vrfy.txt"));
+			commands.Add (new SmtpReplayCommand ("EXPN Example-People\r\n", "rfc0821-expn.txt"));
+
+			using (var client = new CustomSmtpClient ()) {
+				client.LocalDomain = "unit-tests.mimekit.org";
+
+				Assert.Throws<ServiceNotConnectedException> (async () => await client.SendCommandAsync ("COMMAND"));
+
+				try {
+					await client.ReplayConnectAsync ("localhost", new SmtpReplayStream (commands, true));
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Connect: {0}", ex);
+				}
+
+				Assert.IsTrue (client.IsConnected, "Client failed to connect.");
+				Assert.IsFalse (client.IsSecure, "IsSecure should be false.");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.Authentication), "Failed to detect AUTH extension");
+				Assert.IsTrue (client.AuthenticationMechanisms.Contains ("LOGIN"), "Failed to detect the LOGIN auth mechanism");
+				Assert.IsTrue (client.AuthenticationMechanisms.Contains ("PLAIN"), "Failed to detect the PLAIN auth mechanism");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.EightBitMime), "Failed to detect 8BITMIME extension");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.EnhancedStatusCodes), "Failed to detect ENHANCEDSTATUSCODES extension");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.Size), "Failed to detect SIZE extension");
+				Assert.AreEqual (36700160, client.MaxSize, "Failed to parse SIZE correctly");
+
+				Assert.IsTrue (client.Capabilities.HasFlag (SmtpCapabilities.StartTLS), "Failed to detect STARTTLS extension");
+
+				Assert.Throws<ArgumentException> (() => client.Capabilities |= SmtpCapabilities.UTF8);
+
+				Assert.AreEqual (120000, client.Timeout, "Timeout");
+				client.Timeout *= 2;
+
+				Assert.Throws<ArgumentNullException> (async () => await client.SendCommandAsync (null));
+
+				SmtpResponse response = null;
+
+				try {
+					response = await client.SendCommandAsync ("VRFY Smith");
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Verify: {0}", ex);
+				}
+
+				Assert.NotNull (response, "VRFY result");
+				Assert.AreEqual (SmtpStatusCode.Ok, response.StatusCode, "VRFY response code");
+				Assert.AreEqual ("Fred Smith <Smith@USC-ISIF.ARPA>", response.Response, "VRFY response");
+
+				try {
+					response = await client.SendCommandAsync ("EXPN Example-People");
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect an exception in Expand: {0}", ex);
+				}
+
+				Assert.NotNull (response, "EXPN result");
+				Assert.AreEqual (SmtpStatusCode.Ok, response.StatusCode, "EXPN response code");
+				Assert.AreEqual ("Jon Postel <Postel@USC-ISIF.ARPA>\nFred Fonebone <Fonebone@USC-ISIQ.ARPA>\nSam Q. Smith <SQSmith@USC-ISIQ.ARPA>\nQuincy Smith <@USC-ISIF.ARPA:Q-Smith@ISI-VAXA.ARPA>\n<joe@foo-unix.ARPA>\n<xyz@bar-unix.ARPA>", response.Response, "EXPN response");
 			}
 		}
 	}

@@ -164,6 +164,9 @@ namespace MailKit.Net.Imap {
 			Engine.FolderCache.Remove (oldEncodedName);
 			Engine.FolderCache[EncodedName] = this;
 			Access = FolderAccess.None;
+			AnnotationAccess = AnnotationAccess.None;
+			AnnotationScopes = AnnotationScope.None;
+			MaxAnnotationSize = 0;
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -178,12 +181,6 @@ namespace MailKit.Net.Imap {
 
 			foreach (var code in ic.RespCodes) {
 				switch (code.Type) {
-				case ImapResponseCodeType.Alert:
-					Engine.OnAlert (code.Message);
-					break;
-				case ImapResponseCodeType.NotificationOverflow:
-					Engine.OnNotificationOverflow ();
-					break;
 				case ImapResponseCodeType.PermanentFlags:
 					PermanentFlags = ((PermanentFlagsResponseCode) code).Flags;
 					break;
@@ -228,6 +225,12 @@ namespace MailKit.Net.Imap {
 					// a *tagged* MAILBOXID resp-code is returned on CREATE.
 					if (!code.IsTagged)
 						Id = ((MailboxIdResponseCode) code).MailboxId;
+					break;
+				case ImapResponseCodeType.Annotations:
+					var annotations = (AnnotationsResponseCode) code;
+					AnnotationAccess = annotations.Access;
+					AnnotationScopes = annotations.Scopes;
+					MaxAnnotationSize = annotations.MaxSize;
 					break;
 				}
 			}
@@ -299,6 +302,9 @@ namespace MailKit.Net.Imap {
 				folder.PermanentFlags = MessageFlags.None;
 				folder.AcceptedFlags = MessageFlags.None;
 				folder.Access = FolderAccess.None;
+				folder.AnnotationAccess = AnnotationAccess.None;
+				folder.AnnotationScopes = AnnotationScope.None;
+				folder.MaxAnnotationSize = 0;
 
 				folder.OnClosed ();
 			}
@@ -327,7 +333,12 @@ namespace MailKit.Net.Imap {
 			if (!Engine.QResyncEnabled)
 				throw new InvalidOperationException ("The QRESYNC extension has not been enabled.");
 
-			var qresync = string.Format (CultureInfo.InvariantCulture, "(QRESYNC ({0} {1}", uidValidity, highestModSeq);
+			string qresync;
+
+			if ((Engine.Capabilities & ImapCapabilities.Annotate) != 0)
+				qresync = string.Format (CultureInfo.InvariantCulture, "(ANNOTATE QRESYNC ({0} {1}", uidValidity, highestModSeq);
+			else
+				qresync = string.Format (CultureInfo.InvariantCulture, "(QRESYNC ({0} {1}", uidValidity, highestModSeq);
 
 			if (uids.Count > 0) {
 				var set = UniqueIdSet.ToString (uids);
@@ -460,8 +471,17 @@ namespace MailKit.Net.Imap {
 
 			CheckState (false, false);
 
-			var condstore = (Engine.Capabilities & ImapCapabilities.CondStore) != 0 ? " (CONDSTORE)" : string.Empty;
-			var command = string.Format ("{0} %F{1}\r\n", SelectOrExamine (access), condstore);
+			var @params = string.Empty;
+
+			if ((Engine.Capabilities & ImapCapabilities.CondStore) != 0)
+				@params += "CONDSTORE";
+			if ((Engine.Capabilities & ImapCapabilities.Annotate) != 0)
+				@params += " ANNOTATE";
+
+			if (@params.Length > 0)
+				@params = " (" + @params.TrimStart () + ")";
+
+			var command = string.Format ("{0} %F{1}\r\n", SelectOrExamine (access), @params);
 			var ic = new ImapCommand (Engine, cancellationToken, this, command, this);
 
 			return OpenAsync (ic, access, doAsync, cancellationToken);
@@ -573,6 +593,9 @@ namespace MailKit.Net.Imap {
 			}
 
 			Access = FolderAccess.None;
+			AnnotationAccess = AnnotationAccess.None;
+			AnnotationScopes = AnnotationScope.None;
+			MaxAnnotationSize = 0;
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -1037,6 +1060,9 @@ namespace MailKit.Net.Imap {
 
 			FullName = Engine.DecodeMailboxName (encodedName);
 			Access = FolderAccess.None;
+			AnnotationAccess = AnnotationAccess.None;
+			AnnotationScopes = AnnotationScope.None;
+			MaxAnnotationSize = 0;
 			EncodedName = encodedName;
 			Name = name;
 
@@ -1106,6 +1132,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Renames the folder to exist with a new name under a new parent folder.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="parent">The new parent folder.</param>
 		/// <param name="name">The new name of the folder.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -1168,6 +1195,9 @@ namespace MailKit.Net.Imap {
 				throw ImapCommandException.Create ("DELETE", ic);
 
 			Access = FolderAccess.None;
+			AnnotationAccess = AnnotationAccess.None;
+			AnnotationScopes = AnnotationScope.None;
+			MaxAnnotationSize = 0;
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -1223,6 +1253,7 @@ namespace MailKit.Net.Imap {
 		/// <para>Deletes the folder on the IMAP server.</para>
 		/// <note type="note">This method will not delete any child folders.</note>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ObjectDisposedException">
 		/// The <see cref="ImapClient"/> has been disposed.
@@ -1312,6 +1343,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Subscribes the folder.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ObjectDisposedException">
 		/// The <see cref="ImapClient"/> has been disposed.
@@ -1398,6 +1430,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Unsubscribes the folder.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ObjectDisposedException">
 		/// The <see cref="ImapClient"/> has been disposed.
@@ -1816,6 +1849,7 @@ namespace MailKit.Net.Imap {
 		/// <para>For more information about the <c>CHECK</c> command, see
 		/// <a href="https://tools.ietf.org/html/rfc3501#section-6.4.1">rfc350101</a>.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ObjectDisposedException">
 		/// The <see cref="ImapClient"/> has been disposed.
@@ -1931,6 +1965,7 @@ namespace MailKit.Net.Imap {
 		/// <para>For more information about the <c>STATUS</c> command, see
 		/// <a href="https://tools.ietf.org/html/rfc3501#section-6.3.10">rfc3501</a>.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="items">The items to update.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ObjectDisposedException">
@@ -2627,6 +2662,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Sets the access rights for the specified identity.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="name">The identity name.</param>
 		/// <param name="rights">The access rights.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -2736,6 +2772,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Removes all access rights for the given identity.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="name">The identity name.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
 		/// <exception cref="System.ArgumentNullException">
@@ -3774,19 +3811,33 @@ namespace MailKit.Net.Imap {
 			return ExpungeAsync (uids, true, cancellationToken);
 		}
 
-		ImapCommand QueueAppend (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset? date, CancellationToken cancellationToken, ITransferProgress progress)
+		ImapCommand QueueAppend (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset? date, IList<Annotation> annotations, CancellationToken cancellationToken, ITransferProgress progress)
 		{
-			string format = "APPEND %F";
+			var builder = new StringBuilder ("APPEND %F ");
+			var list = new List<object> ();
+
+			list.Add (this);
 
 			if ((flags & SettableFlags) != 0)
-				format += " " + ImapUtils.FormatFlagsList (flags, 0);
+				builder.AppendFormat ("{0} ", ImapUtils.FormatFlagsList (flags, 0));
 
 			if (date.HasValue)
-				format += " \"" + ImapUtils.FormatInternalDate (date.Value) + "\"";
+				builder.AppendFormat ("\"{0}\" ", ImapUtils.FormatInternalDate (date.Value));
 
-			format += " %L\r\n";
+			if (annotations != null && annotations.Count > 0) {
+				ImapUtils.FormatAnnotations (builder, annotations, list, false);
 
-			var ic = new ImapCommand (Engine, cancellationToken, null, options, format, this, message);
+				if (builder[builder.Length - 1] != ' ')
+					builder.Append (' ');
+			}
+
+			builder.Append ("%L\r\n");
+			list.Add (message);
+
+			var command = builder.ToString ();
+			var args = list.ToArray ();
+
+			var ic = new ImapCommand (Engine, cancellationToken, null, options, command, args);
 			ic.Progress = progress;
 
 			Engine.QueueCommand (ic);
@@ -3794,7 +3845,7 @@ namespace MailKit.Net.Imap {
 			return ic;
 		}
 
-		async Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags, bool doAsync, CancellationToken cancellationToken, ITransferProgress progress)
+		async Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset? date, IList<Annotation> annotations, bool doAsync, CancellationToken cancellationToken, ITransferProgress progress)
 		{
 			if (options == null)
 				throw new ArgumentNullException (nameof (options));
@@ -3817,7 +3868,7 @@ namespace MailKit.Net.Imap {
 			if (format.International && !Engine.UTF8Enabled)
 				throw new InvalidOperationException ("The UTF8 extension has not been enabled.");
 
-			var ic = QueueAppend (format, message, flags, null, cancellationToken, progress);
+			var ic = QueueAppend (format, message, flags, date, annotations, cancellationToken, progress);
 
 			await Engine.RunAsync (ic, doAsync).ConfigureAwait (false);
 
@@ -3883,7 +3934,7 @@ namespace MailKit.Net.Imap {
 		/// </exception>
 		public override UniqueId? Append (FormatOptions options, MimeMessage message, MessageFlags flags = MessageFlags.None, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
 		{
-			return AppendAsync (options, message, flags, false, cancellationToken, progress).GetAwaiter ().GetResult ();
+			return AppendAsync (options, message, flags, null, null, false, cancellationToken, progress).GetAwaiter ().GetResult ();
 		}
 
 		/// <summary>
@@ -3935,47 +3986,7 @@ namespace MailKit.Net.Imap {
 		/// </exception>
 		public override Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags = MessageFlags.None, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
 		{
-			return AppendAsync (options, message, flags, true, cancellationToken, progress);
-		}
-
-		async Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset date, bool doAsync, CancellationToken cancellationToken, ITransferProgress progress)
-		{
-			if (options == null)
-				throw new ArgumentNullException (nameof (options));
-
-			if (message == null)
-				throw new ArgumentNullException (nameof (message));
-
-			CheckState (false, false);
-
-			if (options.International && (Engine.Capabilities & ImapCapabilities.UTF8Accept) == 0)
-				throw new NotSupportedException ("The IMAP server does not support the UTF8 extension.");
-
-			var format = options.Clone ();
-			format.NewLineFormat = NewLineFormat.Dos;
-			format.EnsureNewLine = true;
-
-			if ((Engine.Capabilities & ImapCapabilities.UTF8Only) == ImapCapabilities.UTF8Only)
-				format.International = true;
-
-			if (format.International && !Engine.UTF8Enabled)
-				throw new InvalidOperationException ("The UTF8 extension has not been enabled.");
-
-			var ic = QueueAppend (format, message, flags, date, cancellationToken, progress);
-
-			await Engine.RunAsync (ic, doAsync).ConfigureAwait (false);
-
-			ProcessResponseCodes (ic, this);
-
-			if (ic.Response != ImapCommandResponse.Ok)
-				throw ImapCommandException.Create ("APPEND", ic);
-
-			var append = (AppendUidResponseCode) GetResponseCode (ic, ImapResponseCodeType.AppendUid);
-
-			if (append != null)
-				return append.UidSet[0];
-
-			return null;
+			return AppendAsync (options, message, flags, null, null, true, cancellationToken, progress);
 		}
 
 		/// <summary>
@@ -4028,7 +4039,7 @@ namespace MailKit.Net.Imap {
 		/// </exception>
 		public override UniqueId? Append (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset date, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
 		{
-			return AppendAsync (options, message, flags, date, false, cancellationToken, progress).GetAwaiter ().GetResult ();
+			return AppendAsync (options, message, flags, date, null, false, cancellationToken, progress).GetAwaiter ().GetResult ();
 		}
 
 		/// <summary>
@@ -4081,31 +4092,150 @@ namespace MailKit.Net.Imap {
 		/// </exception>
 		public override Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset date, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
 		{
-			return AppendAsync (options, message, flags, date, true, cancellationToken, progress);
+			return AppendAsync (options, message, flags, date, null, true, cancellationToken, progress);
 		}
 
-		ImapCommand QueueMultiAppend (FormatOptions options, IList<MimeMessage> messages, IList<MessageFlags> flags, IList<DateTimeOffset> dates, CancellationToken cancellationToken, ITransferProgress progress)
+		/// <summary>
+		/// Append the specified message to the folder.
+		/// </summary>
+		/// <remarks>
+		/// Appends the specified message to the folder and returns the UniqueId assigned to the message.
+		/// </remarks>
+		/// <returns>The UID of the appended message, if available; otherwise, <c>null</c>.</returns>
+		/// <param name="options">The formatting options.</param>
+		/// <param name="message">The message.</param>
+		/// <param name="flags">The message flags.</param>
+		/// <param name="date">The received date of the message.</param>
+		/// <param name="annotations">The message annotations.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <param name="progress">The progress reporting mechanism.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para>-or-</para>
+		/// <para><paramref name="message"/> is <c>null</c>.</para>
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="ImapClient"/> has been disposed.
+		/// </exception>
+		/// <exception cref="ServiceNotConnectedException">
+		/// The <see cref="ImapClient"/> is not connected.
+		/// </exception>
+		/// <exception cref="ServiceNotAuthenticatedException">
+		/// The <see cref="ImapClient"/> is not authenticated.
+		/// </exception>
+		/// <exception cref="System.InvalidOperationException">
+		/// Internationalized formatting was requested but has not been enabled.
+		/// </exception>
+		/// <exception cref="FolderNotFoundException">
+		/// The <see cref="ImapFolder"/> does not exist.
+		/// </exception>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// Internationalized formatting was requested but is not supported by the server.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		/// <exception cref="ImapProtocolException">
+		/// The server's response contained unexpected tokens.
+		/// </exception>
+		/// <exception cref="ImapCommandException">
+		/// The server replied with a NO or BAD response.
+		/// </exception>
+		public override UniqueId? Append (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset? date, IList<Annotation> annotations, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
 		{
-			var args = new List<object> ();
-			string format = "APPEND %F";
+			return AppendAsync (options, message, flags, date, annotations, false, cancellationToken, progress).GetAwaiter ().GetResult ();
+		}
 
-			args.Add (this);
+		/// <summary>
+		/// Asynchronously append the specified message to the folder.
+		/// </summary>
+		/// <remarks>
+		/// Appends the specified message to the folder and returns the UniqueId assigned to the message.
+		/// </remarks>
+		/// <returns>The UID of the appended message, if available; otherwise, <c>null</c>.</returns>
+		/// <param name="options">The formatting options.</param>
+		/// <param name="message">The message.</param>
+		/// <param name="flags">The message flags.</param>
+		/// <param name="date">The received date of the message.</param>
+		/// <param name="annotations">The message annotations.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		/// <param name="progress">The progress reporting mechanism.</param>
+		/// <exception cref="System.ArgumentNullException">
+		/// <para><paramref name="options"/> is <c>null</c>.</para>
+		/// <para>-or-</para>
+		/// <para><paramref name="message"/> is <c>null</c>.</para>
+		/// </exception>
+		/// <exception cref="System.ObjectDisposedException">
+		/// The <see cref="ImapClient"/> has been disposed.
+		/// </exception>
+		/// <exception cref="ServiceNotConnectedException">
+		/// The <see cref="ImapClient"/> is not connected.
+		/// </exception>
+		/// <exception cref="ServiceNotAuthenticatedException">
+		/// The <see cref="ImapClient"/> is not authenticated.
+		/// </exception>
+		/// <exception cref="System.InvalidOperationException">
+		/// Internationalized formatting was requested but has not been enabled.
+		/// </exception>
+		/// <exception cref="FolderNotFoundException">
+		/// The <see cref="ImapFolder"/> does not exist.
+		/// </exception>
+		/// <exception cref="System.OperationCanceledException">
+		/// The operation was canceled via the cancellation token.
+		/// </exception>
+		/// <exception cref="System.NotSupportedException">
+		/// Internationalized formatting was requested but is not supported by the server.
+		/// </exception>
+		/// <exception cref="System.IO.IOException">
+		/// An I/O error occurred.
+		/// </exception>
+		/// <exception cref="ImapProtocolException">
+		/// The server's response contained unexpected tokens.
+		/// </exception>
+		/// <exception cref="ImapCommandException">
+		/// The server replied with a NO or BAD response.
+		/// </exception>
+		public override Task<UniqueId?> AppendAsync (FormatOptions options, MimeMessage message, MessageFlags flags, DateTimeOffset? date, IList<Annotation> annotations, CancellationToken cancellationToken = default (CancellationToken), ITransferProgress progress = null)
+		{
+			return AppendAsync (options, message, flags, date, annotations, true, cancellationToken, progress);
+		}
+
+		ImapCommand QueueMultiAppend (FormatOptions options, IList<MimeMessage> messages, IList<MessageFlags> flags, IList<DateTimeOffset> dates, IList<IList<Annotation>> annotations, CancellationToken cancellationToken, ITransferProgress progress)
+		{
+			var builder = new StringBuilder ("APPEND %F");
+			var list = new List<object> ();
+
+			list.Add (this);
 
 			for (int i = 0; i < messages.Count; i++) {
+				builder.Append (' ');
+
 				if ((flags[i] & SettableFlags) != 0)
-					format += " " + ImapUtils.FormatFlagsList (flags[i], 0);
+					builder.AppendFormat ("{0} ", ImapUtils.FormatFlagsList (flags[i], 0));
 
 				if (dates != null)
-					format += " \"" + ImapUtils.FormatInternalDate (dates[i]) + "\"";
+					builder.AppendFormat ("\"{0}\" ", ImapUtils.FormatInternalDate (dates[i]));
 
-				format += " %L";
+				//if (annotations != null && annotations[i] != null && annotations[i].Count > 0) {
+				//	ImapUtils.FormatAnnotations (builder, annotations[i], list, false);
 
-				args.Add (messages[i]);
+				//	if (builder[builder.Length - 1] != ' ')
+				//		builder.Append (' ');
+				//}
+
+				builder.Append ("%L");
+				list.Add (messages[i]);
 			}
 
-			format += "\r\n";
+			builder.Append ("\r\n");
 
-			var ic = new ImapCommand (Engine, cancellationToken, null, options, format, args.ToArray ());
+			var command = builder.ToString ();
+			var args = list.ToArray ();
+
+			var ic = new ImapCommand (Engine, cancellationToken, null, options, command, args);
 			ic.Progress = progress;
 
 			Engine.QueueCommand (ic);
@@ -4151,7 +4281,7 @@ namespace MailKit.Net.Imap {
 				return new UniqueId[0];
 
 			if ((Engine.Capabilities & ImapCapabilities.MultiAppend) != 0) {
-				var ic = QueueMultiAppend (format, messages, flags, null, cancellationToken, progress);
+				var ic = QueueMultiAppend (format, messages, flags, null, null, cancellationToken, progress);
 
 				await Engine.RunAsync (ic, doAsync).ConfigureAwait (false);
 
@@ -4172,7 +4302,7 @@ namespace MailKit.Net.Imap {
 			var uids = new List<UniqueId> ();
 
 			for (int i = 0; i < messages.Count; i++) {
-				var uid = await AppendAsync (format, messages[i], flags[i], doAsync, cancellationToken, progress).ConfigureAwait (false);
+				var uid = await AppendAsync (format, messages[i], flags[i], null, null, doAsync, cancellationToken, progress).ConfigureAwait (false);
 				if (uids != null && uid.HasValue)
 					uids.Add (uid.Value);
 				else
@@ -4344,7 +4474,7 @@ namespace MailKit.Net.Imap {
 				return new UniqueId[0];
 
 			if ((Engine.Capabilities & ImapCapabilities.MultiAppend) != 0) {
-				var ic = QueueMultiAppend (format, messages, flags, dates, cancellationToken, progress);
+				var ic = QueueMultiAppend (format, messages, flags, dates, null, cancellationToken, progress);
 
 				await Engine.RunAsync (ic, doAsync).ConfigureAwait (false);
 
@@ -4365,7 +4495,7 @@ namespace MailKit.Net.Imap {
 			var uids = new List<UniqueId> ();
 
 			for (int i = 0; i < messages.Count; i++) {
-				var uid = await AppendAsync (format, messages[i], flags[i], dates[i], doAsync, cancellationToken, progress).ConfigureAwait (false);
+				var uid = await AppendAsync (format, messages[i], flags[i], dates[i], null, doAsync, cancellationToken, progress).ConfigureAwait (false);
 				if (uids != null && uid.HasValue)
 					uids.Add (uid.Value);
 				else
@@ -4969,6 +5099,7 @@ namespace MailKit.Net.Imap {
 		/// <remarks>
 		/// Copies the specified messages to the destination folder.
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="indexes">The indexes of the messages to copy.</param>
 		/// <param name="destination">The destination folder.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -5120,6 +5251,7 @@ namespace MailKit.Net.Imap {
 		/// may be advisable to implement your own logic for moving messages in this case in order to better
 		/// handle spontanious server disconnects and other error conditions.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="indexes">The indexes of the messages to move.</param>
 		/// <param name="destination">The destination folder.</param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -5213,7 +5345,7 @@ namespace MailKit.Net.Imap {
 		internal void OnExpunge (int index)
 		{
 			Count--;
-			
+
 			OnMessageExpunged (new MessageEventArgs (index));
 			OnCountChanged ();
 		}
@@ -5242,6 +5374,14 @@ namespace MailKit.Net.Imap {
 				args.UniqueId = uid;
 
 				OnMessageLabelsChanged (args);
+			}
+
+			if ((message.Fields & MessageSummaryItems.Annotations) != 0) {
+				var args = new AnnotationsChangedEventArgs (index, message.Annotations);
+				args.ModSeq = message.ModSeq;
+				args.UniqueId = uid;
+
+				OnAnnotationsChanged (args);
 			}
 
 			if ((message.Fields & MessageSummaryItems.ModSeq) != 0) {

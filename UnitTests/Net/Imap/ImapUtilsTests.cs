@@ -492,6 +492,49 @@ namespace UnitTests.Net.Imap {
 			}
 		}
 
+		// This tests the work-around for issue #878
+		[Test]
+		public void TestParseBrokenMultipartRelatedBodyStructure ()
+		{
+			const string text = "((\"multipart\" \"related\" (\"boundary\" \"----=_@@@@BeautyqueenS87@_@147836_6893840099.85426606923635\") NIL NIL \"7BIT\" 400 (\"boundary\" \"----=_@@@@BeautyqueenS87@_@147836_6893840099.85426606923635\") NIL NIL NIL)(\"TEXT\" \"html\" (\"charset\" \"UTF8\") NIL NIL \"7BIT\" 1115 70 NIL NIL NIL NIL)(\"TEXT\" \"html\" (\"charset\" \"UTF8\") NIL NIL \"QUOTED-PRINTABLE\" 16 2 NIL NIL NIL NIL) \"mixed\" (\"boundary\" \"----=--_DRYORTABLE@@@_@@@8957836_03253840099.78526606923635\") NIL NIL NIL)\r\n";
+			using (var memory = new MemoryStream (Encoding.ASCII.GetBytes (text), false)) {
+				using (var tokenizer = new ImapStream (memory, null, new NullProtocolLogger ())) {
+					using (var engine = new ImapEngine (null)) {
+						BodyPart body;
+
+						engine.SetStream (tokenizer);
+
+						try {
+							body = ImapUtils.ParseBodyAsync (engine, "Unexpected token: {0}", string.Empty, false, CancellationToken.None).GetAwaiter ().GetResult ();
+						} catch (Exception ex) {
+							Assert.Fail ("Parsing BODYSTRUCTURE failed: {0}", ex);
+							return;
+						}
+
+						var token = engine.ReadToken (CancellationToken.None);
+						Assert.AreEqual (ImapTokenType.Eoln, token.Type, "Expected new-line, but got: {0}", token);
+
+						Assert.IsInstanceOf<BodyPartMultipart> (body, "Body types did not match.");
+						var multipart = (BodyPartMultipart) body;
+
+						Assert.IsTrue (multipart.ContentType.IsMimeType ("multipart", "mixed"), "multipart/mixed Content-Type did not match.");
+						Assert.AreEqual ("----=--_DRYORTABLE@@@_@@@8957836_03253840099.78526606923635", multipart.ContentType.Parameters["boundary"], "boundary param did not match");
+						Assert.AreEqual (3, multipart.BodyParts.Count, "BodyParts count did not match.");
+
+						Assert.IsInstanceOf<BodyPartBasic> (multipart.BodyParts[0], "The type of the first child did not match.");
+						Assert.IsInstanceOf<BodyPartText> (multipart.BodyParts[1], "The type of the second child did not match.");
+						Assert.IsInstanceOf<BodyPartText> (multipart.BodyParts[2], "The type of the third child did not match.");
+
+						var related = (BodyPartBasic) multipart.BodyParts[0];
+						Assert.IsTrue (related.ContentType.IsMimeType ("multipart", "related"), "multipart/related Content-Type did not match.");
+						Assert.AreEqual ("----=_@@@@BeautyqueenS87@_@147836_6893840099.85426606923635", related.ContentType.Parameters["boundary"], "multipart/related boundary param did not match");
+						Assert.AreEqual ("7BIT", related.ContentTransferEncoding, "multipart/related Content-Transfer-Encoding did not match.");
+						Assert.AreEqual (400, related.Octets, "multipart/related octets do not match.");
+					}
+				}
+			}
+		}
+
 		[Test]
 		public void TestParseBodyStructureWithContentMd5DspLanguageAndLocation ()
 		{
@@ -1131,6 +1174,133 @@ namespace UnitTests.Net.Imap {
 
 						Assert.AreEqual ((uint) 352, children[0].UniqueId.Value.Id);
 						Assert.AreEqual ((uint) 381, children[1].UniqueId.Value.Id);
+					}
+				}
+			}
+		}
+
+		[Test]
+		public void TestFormatAnnotations ()
+		{
+			var annotations = new List<Annotation> ();
+			var command = new StringBuilder ("STORE ");
+			var args = new List<object> ();
+
+			ImapUtils.FormatAnnotations (command, annotations, args, false);
+			Assert.AreEqual ("STORE ", command.ToString (), "empty collection");
+
+			annotations.Add (new Annotation (AnnotationEntry.AltSubject));
+
+			ImapUtils.FormatAnnotations (command, annotations, args, false);
+			Assert.AreEqual ("STORE ", command.ToString (), "annotation w/o properties");
+			Assert.Throws<ArgumentException> (() => ImapUtils.FormatAnnotations (command, annotations, args, true));
+
+			command.Clear ();
+			command.Append ("STORE ");
+			annotations[0].Properties.Add (AnnotationAttribute.SharedValue, "This is an alternate subject.");
+			ImapUtils.FormatAnnotations (command, annotations, args, true);
+			Assert.AreEqual ("STORE ANNOTATION (/altsubject (value.shared %S))", command.ToString ());
+			Assert.AreEqual (1, args.Count, "args");
+			Assert.AreEqual ("This is an alternate subject.", args[0], "args[0]");
+		}
+
+		[Test]
+		public void TestParseAnnotationsExample1 ()
+		{
+			const string text = "(/comment (value.priv \"My comment\" value.shared NIL))\r\n";
+
+			using (var memory = new MemoryStream (Encoding.ASCII.GetBytes (text), false)) {
+				using (var tokenizer = new ImapStream (memory, null, new NullProtocolLogger ())) {
+					using (var engine = new ImapEngine (null)) {
+						IList<Annotation> annotations;
+
+						engine.SetStream (tokenizer);
+
+						try {
+							annotations = ImapUtils.ParseAnnotationsAsync (engine, false, CancellationToken.None).GetAwaiter ().GetResult ();
+						} catch (Exception ex) {
+							Assert.Fail ("Parsing ANNOTATION response failed: {0}", ex);
+							return;
+						}
+
+						var token = engine.ReadToken (CancellationToken.None);
+						Assert.AreEqual (ImapTokenType.Eoln, token.Type, "Expected new-line, but got: {0}", token);
+
+						Assert.AreEqual (1, annotations.Count, "Count");
+						Assert.AreEqual (AnnotationEntry.Comment, annotations[0].Entry, "Entry");
+						Assert.AreEqual (2, annotations[0].Properties.Count, "Properties.Count");
+						Assert.AreEqual ("My comment", annotations[0].Properties[AnnotationAttribute.PrivateValue], "value.priv");
+						Assert.AreEqual (null, annotations[0].Properties[AnnotationAttribute.SharedValue], "value.shared");
+					}
+				}
+			}
+		}
+
+		[Test]
+		public void TestParseAnnotationsExample2 ()
+		{
+			const string text = "(/comment (value.priv \"My comment\" value.shared NIL) /altsubject (value.priv \"My subject\" value.shared NIL))\r\n";
+
+			using (var memory = new MemoryStream (Encoding.ASCII.GetBytes (text), false)) {
+				using (var tokenizer = new ImapStream (memory, null, new NullProtocolLogger ())) {
+					using (var engine = new ImapEngine (null)) {
+						IList<Annotation> annotations;
+
+						engine.SetStream (tokenizer);
+
+						try {
+							annotations = ImapUtils.ParseAnnotationsAsync (engine, false, CancellationToken.None).GetAwaiter ().GetResult ();
+						} catch (Exception ex) {
+							Assert.Fail ("Parsing ANNOTATION response failed: {0}", ex);
+							return;
+						}
+
+						var token = engine.ReadToken (CancellationToken.None);
+						Assert.AreEqual (ImapTokenType.Eoln, token.Type, "Expected new-line, but got: {0}", token);
+
+						Assert.AreEqual (2, annotations.Count, "Count");
+						Assert.AreEqual (AnnotationEntry.Comment, annotations[0].Entry, "annotations[0].Entry");
+						Assert.AreEqual (2, annotations[0].Properties.Count, "annotations[0].Properties.Count");
+						Assert.AreEqual ("My comment", annotations[0].Properties[AnnotationAttribute.PrivateValue], "annotations[0] value.priv");
+						Assert.AreEqual (null, annotations[0].Properties[AnnotationAttribute.SharedValue], "annotations[0] value.shared");
+						Assert.AreEqual (AnnotationEntry.AltSubject, annotations[1].Entry, "annotations[1].Entry");
+						Assert.AreEqual (2, annotations[1].Properties.Count, "annotations[1].Properties.Count");
+						Assert.AreEqual ("My subject", annotations[1].Properties[AnnotationAttribute.PrivateValue], "annotations[1] value.priv");
+						Assert.AreEqual (null, annotations[1].Properties[AnnotationAttribute.SharedValue], "annotations[1] value.shared");
+					}
+				}
+			}
+		}
+
+		[Test]
+		public void TestParseAnnotationsExample3 ()
+		{
+			const string text = "(/comment (value.priv \"My comment\" value.shared NIL size.priv \"10\" size.shared \"0\"))\r\n";
+
+			using (var memory = new MemoryStream (Encoding.ASCII.GetBytes (text), false)) {
+				using (var tokenizer = new ImapStream (memory, null, new NullProtocolLogger ())) {
+					using (var engine = new ImapEngine (null)) {
+						IList<Annotation> annotations;
+
+						engine.SetStream (tokenizer);
+
+						try {
+							annotations = ImapUtils.ParseAnnotationsAsync (engine, false, CancellationToken.None).GetAwaiter ().GetResult ();
+						} catch (Exception ex) {
+							Assert.Fail ("Parsing ANNOTATION response failed: {0}", ex);
+							return;
+						}
+
+						var token = engine.ReadToken (CancellationToken.None);
+						Assert.AreEqual (ImapTokenType.Eoln, token.Type, "Expected new-line, but got: {0}", token);
+
+						Assert.AreEqual (1, annotations.Count, "Count");
+						Assert.AreEqual (AnnotationEntry.Comment, annotations[0].Entry, "annotations[0].Entry");
+						Assert.AreEqual (4, annotations[0].Properties.Count, "annotations[0].Properties.Count");
+						Assert.AreEqual ("My comment", annotations[0].Properties[AnnotationAttribute.PrivateValue], "annotations[0] value.priv");
+						Assert.AreEqual (null, annotations[0].Properties[AnnotationAttribute.SharedValue], "annotations[0] value.shared");
+						Assert.AreEqual ("10", annotations[0].Properties[AnnotationAttribute.PrivateSize], "annotations[0] size.priv");
+						Assert.AreEqual ("0", annotations[0].Properties[AnnotationAttribute.SharedSize], "annotations[0] size.shared");
 					}
 				}
 			}

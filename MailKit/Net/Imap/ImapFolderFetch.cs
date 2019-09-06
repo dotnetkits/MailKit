@@ -174,7 +174,7 @@ namespace MailKit.Net.Imap
 				uint value;
 				int idx;
 
-				switch (atom) {
+				switch (atom.ToUpperInvariant ()) {
 				case "INTERNALDATE":
 					token = await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
 
@@ -377,6 +377,10 @@ namespace MailKit.Net.Imap
 					message.GMailLabels = await ImapUtils.ParseLabelsListAsync (engine, doAsync, cancellationToken).ConfigureAwait (false);
 					message.Fields |= MessageSummaryItems.GMailLabels;
 					break;
+				case "ANNOTATION":
+					message.Annotations = await ImapUtils.ParseAnnotationsAsync (engine, doAsync, cancellationToken).ConfigureAwait (false);
+					message.Fields |= MessageSummaryItems.Annotations;
+					break;
 				default:
 					// Unexpected or unknown token (such as XAOL.SPAM.REASON or XAOL-MSGID). Simply read 1 more token (the argument) and ignore.
 					token = await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
@@ -456,6 +460,11 @@ namespace MailKit.Net.Imap
 			if ((engine.Capabilities & ImapCapabilities.CondStore) != 0) {
 				if ((items & MessageSummaryItems.ModSeq) != 0)
 					tokens.Add ("MODSEQ");
+			}
+
+			if ((engine.Capabilities & ImapCapabilities.Annotate) != 0) {
+				if ((items & MessageSummaryItems.Annotations) != 0)
+					tokens.Add ("ANNOTATION (/* (value size))");
 			}
 
 			if ((engine.Capabilities & ImapCapabilities.ObjectID) != 0) {
@@ -573,7 +582,10 @@ namespace MailKit.Net.Imap
 				var charset = body.ContentType.Charset;
 				ContentEncoding encoding;
 
-				MimeUtils.TryParse (body.ContentTransferEncoding, out encoding);
+				if (!string.IsNullOrEmpty (body.ContentTransferEncoding))
+					MimeUtils.TryParse (body.ContentTransferEncoding, out encoding);
+				else
+					encoding = ContentEncoding.Default;
 
 				using (var memory = new MemoryStream ()) {
 					var content = new MimeContent (section.Stream, encoding);
@@ -3540,11 +3552,13 @@ namespace MailKit.Net.Imap
 		async Task FetchStreamAsync (ImapEngine engine, ImapCommand ic, int index, bool doAsync)
 		{
 			var token = await engine.ReadTokenAsync (doAsync, ic.CancellationToken).ConfigureAwait (false);
+			var annotations = new AnnotationsChangedEventArgs (index);
 			var labels = new MessageLabelsChangedEventArgs (index);
 			var flags = new MessageFlagsChangedEventArgs (index);
 			var modSeq = new ModSeqChangedEventArgs (index);
 			var ctx = (FetchStreamContextBase) ic.UserData;
 			var sectionBuilder = new StringBuilder ();
+			bool annotationsChanged = false;
 			bool modSeqChanged = false;
 			bool labelsChanged = false;
 			bool flagsChanged = false;
@@ -3571,7 +3585,7 @@ namespace MailKit.Net.Imap
 				ulong modseq;
 				uint value;
 
-				switch (atom) {
+				switch (atom.ToUpperInvariant ()) {
 				case "BODY":
 					token = await engine.ReadTokenAsync (doAsync, ic.CancellationToken).ConfigureAwait (false);
 
@@ -3714,6 +3728,8 @@ namespace MailKit.Net.Imap
 
 					ctx.SetUniqueId (index, uid.Value);
 
+					annotations.UniqueId = uid.Value;
+					modSeq.UniqueId = uid.Value;
 					labels.UniqueId = uid.Value;
 					flags.UniqueId = uid.Value;
 					break;
@@ -3733,6 +3749,7 @@ namespace MailKit.Net.Imap
 					if (modseq > HighestModSeq)
 						UpdateHighestModSeq (modseq);
 
+					annotations.ModSeq = modseq;
 					modSeq.ModSeq = modseq;
 					labels.ModSeq = modseq;
 					flags.ModSeq = modseq;
@@ -3749,6 +3766,12 @@ namespace MailKit.Net.Imap
 					// may send it if another client has recently modified the message labels.
 					labels.Labels = await ImapUtils.ParseLabelsListAsync (engine, doAsync, ic.CancellationToken).ConfigureAwait (false);
 					labelsChanged = true;
+					break;
+				case "ANNOTATION":
+					// even though we didn't request this piece of information, the IMAP server
+					// may send it if another client has recently modified the message annotations.
+					annotations.Annotations = await ImapUtils.ParseAnnotationsAsync (engine, doAsync, ic.CancellationToken).ConfigureAwait (false);
+					annotationsChanged = true;
 					break;
 				default:
 					// Unexpected or unknown token (such as XAOL.SPAM.REASON or XAOL-MSGID). Simply read 1 more token (the argument) and ignore.
@@ -3767,6 +3790,9 @@ namespace MailKit.Net.Imap
 
 			if (labelsChanged)
 				OnMessageLabelsChanged (labels);
+
+			if (annotationsChanged)
+				OnAnnotationsChanged (annotations);
 
 			if (modSeqChanged)
 				OnModSeqChanged (modSeq);
@@ -6459,6 +6485,7 @@ namespace MailKit.Net.Imap
 		/// <remarks>
 		/// <para>Asynchronously gets the streams for the specified messages.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="uids">The uids of the messages.</param>
 		/// <param name="callback"></param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -6553,6 +6580,7 @@ namespace MailKit.Net.Imap
 		/// <remarks>
 		/// <para>Asynchronously gets the streams for the specified messages.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="indexes">The indexes of the messages.</param>
 		/// <param name="callback"></param>
 		/// <param name="cancellationToken">The cancellation token.</param>
@@ -6648,6 +6676,7 @@ namespace MailKit.Net.Imap
 		/// <remarks>
 		/// <para>Asynchronously gets the streams for the specified messages.</para>
 		/// </remarks>
+		/// <returns>An awaitable task.</returns>
 		/// <param name="min">The minimum index.</param>
 		/// <param name="max">The maximum index, or <c>-1</c> to specify no upper bound.</param>
 		/// <param name="callback"></param>

@@ -255,6 +255,50 @@ namespace MailKit.Net.Imap {
 		}
 
 		/// <summary>
+		/// Formats a list of annotations for a STORE or APPEND command.
+		/// </summary>
+		/// <param name="command">The command builder.</param>
+		/// <param name="annotations">The annotations.</param>
+		/// <param name="args">the argument list.</param>
+		/// <param name="throwOnError">Throw an exception if there are any annotations without properties.</param>
+		public static void FormatAnnotations (StringBuilder command, IList<Annotation> annotations, List<object> args, bool throwOnError)
+		{
+			int length = command.Length;
+			int added = 0;
+
+			command.Append ("ANNOTATION (");
+
+			for (int i = 0; i < annotations.Count; i++) {
+				var annotation = annotations[i];
+
+				if (annotation.Properties.Count == 0) {
+					if (throwOnError)
+						throw new ArgumentException ("One or more annotations does not define any attributes.", nameof (annotations));
+
+					continue;
+				}
+
+				command.Append (annotation.Entry);
+				command.Append (" (");
+
+				foreach (var property in annotation.Properties) {
+					command.AppendFormat ("{0} %S ", property.Key);
+					args.Add (property.Value);
+				}
+
+				command[command.Length - 1] = ')';
+				command.Append (' ');
+
+				added++;
+			}
+
+			if (added > 0)
+				command[command.Length - 1] = ')';
+			else
+				command.Length = length;
+		}
+
+		/// <summary>
 		/// Formats the array of indexes as a string suitable for use with IMAP commands.
 		/// </summary>
 		/// <returns>The index set.</returns>
@@ -1008,6 +1052,7 @@ namespace MailKit.Net.Imap {
 			var enc = await ReadNStringTokenAsync (engine, format, false, doAsync, cancellationToken).ConfigureAwait (false);
 			var octets = await ReadNumberAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
 			var type = (ContentType) result;
+			var isMultipart = false;
 			BodyPartBasic body;
 
 			if (type.IsMimeType ("message", "rfc822")) {
@@ -1040,6 +1085,7 @@ namespace MailKit.Net.Imap {
 				text.Lines = await ReadNumberAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
 				body = text;
 			} else {
+				isMultipart = type.IsMimeType ("multipart", "*");
 				body = new BodyPartBasic ();
 			}
 
@@ -1053,24 +1099,26 @@ namespace MailKit.Net.Imap {
 			// if we are parsing a BODYSTRUCTURE, we may get some more tokens before the ')'
 			token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
 
-			if (token.Type != ImapTokenType.CloseParen) {
-				body.ContentMd5 = await ReadNStringTokenAsync (engine, format, false, doAsync, cancellationToken).ConfigureAwait (false);
-				token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
-			}
+			if (!isMultipart) {
+				if (token.Type != ImapTokenType.CloseParen) {
+					body.ContentMd5 = await ReadNStringTokenAsync (engine, format, false, doAsync, cancellationToken).ConfigureAwait (false);
+					token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				}
 
-			if (token.Type != ImapTokenType.CloseParen) {
-				body.ContentDisposition = await ParseContentDispositionAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
-				token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
-			}
+				if (token.Type != ImapTokenType.CloseParen) {
+					body.ContentDisposition = await ParseContentDispositionAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
+					token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				}
 
-			if (token.Type != ImapTokenType.CloseParen) {
-				body.ContentLanguage = await ParseContentLanguageAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
-				token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
-			}
+				if (token.Type != ImapTokenType.CloseParen) {
+					body.ContentLanguage = await ParseContentLanguageAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
+					token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				}
 
-			if (token.Type != ImapTokenType.CloseParen) {
-				body.ContentLocation = await ParseContentLocationAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
-				token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				if (token.Type != ImapTokenType.CloseParen) {
+					body.ContentLocation = await ParseContentLocationAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
+					token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				}
 			}
 
 			while (token.Type != ImapTokenType.CloseParen) {
@@ -1380,6 +1428,65 @@ namespace MailKit.Net.Imap {
 			ImapEngine.AssertToken (token, ImapTokenType.CloseParen, ImapEngine.GenericItemSyntaxErrorFormat, name, token);
 
 			return flags;
+		}
+
+		/// <summary>
+		/// Parses the ANNOTATION list.
+		/// </summary>
+		/// <returns>The list of annotations.</returns>
+		/// <param name="engine">The IMAP engine.</param>
+		/// <param name="doAsync">Whether or not asynchronous IO methods should be used.</param>
+		/// <param name="cancellationToken">The cancellation token.</param>
+		public static async Task<ReadOnlyCollection<Annotation>> ParseAnnotationsAsync (ImapEngine engine, bool doAsync, CancellationToken cancellationToken)
+		{
+			var format = string.Format (ImapEngine.GenericUntaggedResponseSyntaxErrorFormat, "ANNOTATION", "{0}");
+			var token = await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+			var annotations = new List<Annotation> ();
+
+			ImapEngine.AssertToken (token, ImapTokenType.OpenParen, ImapEngine.GenericItemSyntaxErrorFormat, "ANNOTATION", token);
+
+			do {
+				token = await engine.PeekTokenAsync (ImapStream.AtomSpecials, doAsync, cancellationToken).ConfigureAwait (false);
+
+				if (token.Type == ImapTokenType.CloseParen)
+					break;
+
+				var path = await ReadStringTokenAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
+				var entry = AnnotationEntry.Parse (path);
+				var annotation = new Annotation (entry);
+
+				annotations.Add (annotation);
+
+				token = await engine.PeekTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+
+				// Note: Unsolicited FETCH responses that include ANNOTATION data do not include attribute values.
+				if (token.Type == ImapTokenType.OpenParen) {
+					// consume the '('
+					await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+
+					// read the attribute/value pairs
+					do {
+						token = await engine.PeekTokenAsync (ImapStream.AtomSpecials, doAsync, cancellationToken).ConfigureAwait (false);
+
+						if (token.Type == ImapTokenType.CloseParen)
+							break;
+
+						var name = await ReadStringTokenAsync (engine, format, doAsync, cancellationToken).ConfigureAwait (false);
+						var value = await ReadNStringTokenAsync (engine, format, false, doAsync, cancellationToken).ConfigureAwait (false);
+						var attribute = new AnnotationAttribute (name);
+
+						annotation.Properties[attribute] = value;
+					} while (true);
+
+					// consume the ')'
+					await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+				}
+			} while (true);
+
+			// consume the ')'
+			await engine.ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
+
+			return new ReadOnlyCollection<Annotation> (annotations);
 		}
 
 		/// <summary>

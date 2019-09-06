@@ -122,6 +122,30 @@ namespace MailKit.Search {
 		}
 
 		/// <summary>
+		/// Match messages with the specified annotation.
+		/// </summary>
+		/// <remarks>
+		/// <para>Matches messages with the specified annotation.</para>
+		/// <note type="warning">This feature is not supported by all IMAP servers.</note>
+		/// </remarks>
+		/// <param name="entry">The annotation entry.</param>
+		/// <param name="attribute">The annotation attribute.</param>
+		/// <param name="value">The annotation attribute value.</param>
+		/// <returns>A <see cref="AnnotationSearchQuery"/>.</returns>
+		/// <exception cref="System.ArgumentNullException">
+		/// <para><paramref name="entry"/> is <c>null</c>.</para>
+		/// <para>-or-</para>
+		/// <para><paramref name="attribute"/> is <c>null</c>.</para>
+		/// </exception>
+		/// <exception cref="System.ArgumentException">
+		/// <paramref name="attribute"/> is not a valid attribute for searching.
+		/// </exception>
+		public static AnnotationSearchQuery AnnotationsContain (AnnotationEntry entry, AnnotationAttribute attribute, string value)
+		{
+			return new AnnotationSearchQuery (entry, attribute, value);
+		}
+
+		/// <summary>
 		/// Match messages with the <see cref="MessageFlags.Answered"/> flag set.
 		/// </summary>
 		/// <remarks>
@@ -873,17 +897,18 @@ namespace MailKit.Search {
 		public static readonly SearchQuery Seen = new SearchQuery (SearchTerm.Seen);
 
 		/// <summary>
-		/// Match messages that were sent after the specified date.
+		/// Match messages that were sent on or after the specified date.
 		/// </summary>
 		/// <remarks>
-		/// <para>Matches messages that were sent after the specified date.</para>
+		/// <para>Matches messages that were sent on or after the specified date.</para>
 		/// <para>The resolution of this search query does not include the time.</para>
 		/// </remarks>
 		/// <returns>A <see cref="DateSearchQuery"/>.</returns>
 		/// <param name="date">The date.</param>
+		[Obsolete ("Use SentSince (DateTime)")]
 		public static DateSearchQuery SentAfter (DateTime date)
 		{
-			return new DateSearchQuery (SearchTerm.SentAfter, date);
+			return SentSince (date);
 		}
 
 		/// <summary>
@@ -891,7 +916,7 @@ namespace MailKit.Search {
 		/// </summary>
 		/// <remarks>
 		/// <para>Matches messages that were sent before the specified date.</para>
-		/// <para>The resolution of this search query does not include the time.</para>
+		/// <note type="note">The resolution of this search query does not include the time.</note>
 		/// </remarks>
 		/// <returns>A <see cref="DateSearchQuery"/>.</returns>
 		/// <param name="date">The date.</param>
@@ -905,13 +930,27 @@ namespace MailKit.Search {
 		/// </summary>
 		/// <remarks>
 		/// <para>Matches messages that were sent on the specified date.</para>
-		/// <para>The resolution of this search query does not include the time.</para>
+		/// <note type="note">The resolution of this search query does not include the time.</note>
 		/// </remarks>
 		/// <returns>A <see cref="DateSearchQuery"/>.</returns>
 		/// <param name="date">The date.</param>
 		public static DateSearchQuery SentOn (DateTime date)
 		{
 			return new DateSearchQuery (SearchTerm.SentOn, date);
+		}
+
+		/// <summary>
+		/// Match messages that were sent since the specified date.
+		/// </summary>
+		/// <remarks>
+		/// <para>Matches messages that were sent since the specified date.</para>
+		/// <note type="note">The resolution of this search query does not include the time.</note>
+		/// </remarks>
+		/// <returns>A <see cref="DateSearchQuery"/>.</returns>
+		/// <param name="date">The date.</param>
+		public static DateSearchQuery SentSince (DateTime date)
+		{
+			return new DateSearchQuery (SearchTerm.SentSince, date);
 		}
 
 		/// <summary>

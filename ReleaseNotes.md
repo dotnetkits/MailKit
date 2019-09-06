@@ -1,17 +1,65 @@
 # Release Notes
 
+### MailKit 2.3.0 (2019-08-24)
+
+* Improved the default SSL/TLS certificate validation logic.
+* Improved exception messages for the POP3 LIST and STAT commands.
+* Modified Pop3Client to accept negative values for the 'octets' value in the STAT response.
+  (issue [#872](https://github.com/jstedfast/MailKit/issues/872))
+* Added work-around for IMAP BODYSTRUCTURE responses that treat multiparts as basic parts.
+  (issue [#878](https://github.com/jstedfast/MailKit/issues/878))
+* Added check to make sure that MD5 is supported by the runtime and automatically disable
+  support for CRAM-MD5 and DIGEST-MD5 SASL mechanisms when MD5 is not supported.
+* Added a Stream property to ProtocolLogger.
+* Fixed fetching of PreviewText items if the body's ContentTransferEncoding is NIL.
+  (issue [#881](https://github.com/jstedfast/MailKit/issues/881))
+* Improved processing of pipelined SMTP commands to provide better exception messages.
+  (issue [#883](https://github.com/jstedfast/MailKit/issues/883))
+* Modified SmtpClient.Send*() to not call MimeMessage.Prepare() if any DKIM or ARC headers
+  are present in order to avoid the potential risk of altering the message and breaking
+  the signatures within those headers.
+* Added SmtpClient.SendCommand[Async]() to allow custom subclasses the ability to send
+  custom commands to the SMTP server.
+  (issue [#891](https://github.com/jstedfast/MailKit/issues/891))
+* Allow SmtpClient subclasses to override message preparation by overriding a new
+  SmtpClient.Prepare() method.
+  (issue [#891](https://github.com/jstedfast/MailKit/issues/891))
+* Improved ImapFolder's ModSeqChanged event to set the UniqueId property if available
+  in unsolicited FETCH notifications including a MODSEQ and UID value.
+* Fixed the IMAP client logic to properly handle lower or mixed case IMAP tokens.
+  (issue [#893](https://github.com/jstedfast/MailKit/issues/893))
+* Added support for IMAP's ANNOTATE-EXPERIMENT-1 extension.
+  (issue [#818](https://github.com/jstedfast/MailKit/issues/818))
+* Always use the SMTP BDAT command instead of DATA if CHUNKING is supported.
+  (issue [#896](https://github.com/jstedfast/MailKit/issues/896))
+* Improved SmtpClient to include a SIZE= parameter in the MAIL FROM command if the
+  SIZE extension is supported. Progress reporting will now always have the expected
+  message size available as well.
+
+### MailKit 2.2.0 (2019-06-11)
+
+* Optimized MailKit's logic for breaking apart long IMAP commands for
+  GMail, Dovecot, and Yahoo! Mail.
+* Fixed the IMAP stream tokenizer to properly handle UTF8 atom tokens.
+  (issue [#859](https://github.com/jstedfast/MailKit/issues/859))
+* Fixed IMAP search code to always handle untagged SEARCH responses even when
+  the response SHOULD be an untagged ESEARCH response.
+  (issue [#863](https://github.com/jstedfast/MailKit/issues/863))
+* Replaced SearchQuery.SentAfter with SentSince to be more consistent with IMAP
+  terminology.
+
 ### MailKit 2.1.5 (2019-05-13)
 
 * Bumped the System.Net.Security dependency for security fixes (CVE-2017-0249).
 * Reduced explicit nuget dependencies.
 * Added a work-around for Microsoft Exchange IMAP servers that sometimes erroneously
   respond with unneeded continuation responses.
-  (issue [#852]((https://github.com/jstedfast/MailKit/issues/852))
+  (issue [#852](https://github.com/jstedfast/MailKit/issues/852))
 * Fixed the ImapClient to Stop looping over SASL mechanisms if the server disconnects us.
-  (issue [#851]((https://github.com/jstedfast/MailKit/issues/851))
-* Added support for HTTP proxies. (issue [#847]((https://github.com/jstedfast/MailKit/issues/847))
+  (issue [#851](https://github.com/jstedfast/MailKit/issues/851))
+* Added support for HTTP proxies. (issue [#847](https://github.com/jstedfast/MailKit/issues/847))
 * Fixed IMAP to properly handle EXPUNGE notifications during a FETCH request.
-  (issue [#850]((https://github.com/jstedfast/MailKit/issues/850))
+  (issue [#850](https://github.com/jstedfast/MailKit/issues/850))
 
 ### MailKit 2.1.4 (2019-04-13)
 

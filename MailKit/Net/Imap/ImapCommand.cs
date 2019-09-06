@@ -404,7 +404,7 @@ namespace MailKit.Net.Imap {
 		/// <param name="args">The command arguments.</param>
 		public ImapCommand (ImapEngine engine, CancellationToken cancellationToken, ImapFolder folder, FormatOptions options, string format, params object[] args)
 		{
-			UntaggedHandlers = new Dictionary<string, ImapUntaggedHandler> ();
+			UntaggedHandlers = new Dictionary<string, ImapUntaggedHandler> (StringComparer.OrdinalIgnoreCase);
 			Logout = format.Equals ("LOGOUT\r\n", StringComparison.Ordinal);
 			RespCodes = new List<ImapResponseCode> ();
 			CancellationToken = cancellationToken;
@@ -846,7 +846,7 @@ namespace MailKit.Net.Imap {
 					if (token.Type != ImapTokenType.Eoln) {
 						// consume the rest of the line...
 						var line = await Engine.ReadLineAsync (doAsync, CancellationToken).ConfigureAwait (false);
-						ResponseText = ((string) (token.Value) + line).TrimEnd ();
+						ResponseText = (((string) token.Value) + line).TrimEnd ();
 						break;
 					}
 				} else if (token.Type == ImapTokenType.OpenBracket) {

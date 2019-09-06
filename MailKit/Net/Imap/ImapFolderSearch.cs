@@ -62,6 +62,7 @@ namespace MailKit.Net.Imap
 		void BuildQuery (StringBuilder builder, SearchQuery query, List<string> args, bool parens, ref bool ascii)
 		{
 			TextSearchQuery text = null;
+			AnnotationSearchQuery annotation;
 			NumericSearchQuery numeric;
 			FilterSearchQuery filter;
 			HeaderSearchQuery header;
@@ -83,6 +84,14 @@ namespace MailKit.Net.Imap
 				BuildQuery (builder, binary.Right, args, false, ref ascii);
 				if (parens)
 					builder.Append (')');
+				break;
+			case SearchTerm.Annotation:
+				if ((Engine.Capabilities & ImapCapabilities.Annotate) == 0)
+					throw new NotSupportedException ("The ANNOTATION search term is not supported by the IMAP server.");
+
+				annotation = (AnnotationSearchQuery) query;
+				builder.AppendFormat ("ANNOTATION {0} {1} %S", annotation.Entry, annotation.Attribute);
+				args.Add (annotation.Value);
 				break;
 			case SearchTerm.Answered:
 				builder.Append ("ANSWERED");
@@ -218,10 +227,6 @@ namespace MailKit.Net.Imap
 			case SearchTerm.Seen:
 				builder.Append ("SEEN");
 				break;
-			case SearchTerm.SentAfter:
-				date = (DateSearchQuery) query;
-				builder.AppendFormat ("SENTSINCE {0}", FormatDateTime (date.Date));
-				break;
 			case SearchTerm.SentBefore:
 				date = (DateSearchQuery) query;
 				builder.AppendFormat ("SENTBEFORE {0}", FormatDateTime (date.Date));
@@ -229,6 +234,10 @@ namespace MailKit.Net.Imap
 			case SearchTerm.SentOn:
 				date = (DateSearchQuery) query;
 				builder.AppendFormat ("SENTON {0}", FormatDateTime (date.Date));
+				break;
+			case SearchTerm.SentSince:
+				date = (DateSearchQuery) query;
+				builder.AppendFormat ("SENTSINCE {0}", FormatDateTime (date.Date));
 				break;
 			case SearchTerm.SmallerThan:
 				numeric = (NumericSearchQuery) query;
@@ -305,7 +314,7 @@ namespace MailKit.Net.Imap
 			return builder.ToString ();
 		}
 
-		static string BuildSortOrder (IList<OrderBy> orderBy)
+		string BuildSortOrder (IList<OrderBy> orderBy)
 		{
 			var builder = new StringBuilder ();
 
@@ -318,11 +327,28 @@ namespace MailKit.Net.Imap
 					builder.Append ("REVERSE ");
 
 				switch (orderBy[i].Type) {
+				case OrderByType.Annotation:
+					if ((Engine.Capabilities & ImapCapabilities.Annotate) == 0)
+						throw new NotSupportedException ("The ANNOTATION search term is not supported by the IMAP server.");
+
+					var annotation = (OrderByAnnotation) orderBy[i];
+					builder.AppendFormat ("ANNOTATION {0} {1}", annotation.Entry, annotation.Attribute);
+					break;
 				case OrderByType.Arrival:     builder.Append ("ARRIVAL"); break;
 				case OrderByType.Cc:          builder.Append ("CC"); break;
 				case OrderByType.Date:        builder.Append ("DATE"); break;
-				case OrderByType.DisplayFrom: builder.Append ("DISPLAYFROM"); break;
-				case OrderByType.DisplayTo:   builder.Append ("DISPLAYTO"); break;
+				case OrderByType.DisplayFrom:
+					if ((Engine.Capabilities & ImapCapabilities.SortDisplay) == 0)
+						throw new NotSupportedException ("The IMAP server does not support the SORT=DISPLAY extension.");
+
+					builder.Append ("DISPLAYFROM");
+					break;
+				case OrderByType.DisplayTo:
+					if ((Engine.Capabilities & ImapCapabilities.SortDisplay) == 0)
+						throw new NotSupportedException ("The IMAP server does not support the SORT=DISPLAY extension.");
+
+					builder.Append ("DISPLAYTO");
+					break;
 				case OrderByType.From:        builder.Append ("FROM"); break;
 				case OrderByType.Size:        builder.Append ("SIZE"); break;
 				case OrderByType.Subject:     builder.Append ("SUBJECT"); break;
@@ -368,7 +394,7 @@ namespace MailKit.Net.Imap
 
 					var atom = (string) token.Value;
 
-					switch (atom) {
+					switch (atom.ToUpperInvariant ()) {
 					case "MODSEQ":
 						token = await engine.ReadTokenAsync (doAsync, ic.CancellationToken).ConfigureAwait (false);
 
@@ -450,7 +476,7 @@ namespace MailKit.Net.Imap
 
 				token = await engine.ReadTokenAsync (doAsync, ic.CancellationToken).ConfigureAwait (false);
 
-				switch (atom) {
+				switch (atom.ToUpperInvariant ()) {
 				case "RELEVANCY":
 					ImapEngine.AssertToken (token, ImapTokenType.OpenParen, ImapEngine.GenericUntaggedResponseSyntaxErrorFormat, "ESEARCH", token);
 
@@ -528,6 +554,10 @@ namespace MailKit.Net.Imap
 			var ic = new ImapCommand (Engine, cancellationToken, this, command);
 			if ((Engine.Capabilities & ImapCapabilities.ESearch) != 0)
 				ic.RegisterUntaggedHandler ("ESEARCH", ESearchMatchesAsync);
+
+			// Note: always register the untagged SEARCH handler because some servers will brokenly
+			// respond with "* SEARCH ..." instead of "* ESEARCH ..." even when using the extended
+			// search syntax.
 			ic.RegisterUntaggedHandler ("SEARCH", SearchMatchesAsync);
 			ic.UserData = new SearchResults (SortOrder.Ascending);
 
@@ -810,6 +840,11 @@ namespace MailKit.Net.Imap
 
 			var ic = new ImapCommand (Engine, cancellationToken, this, command, args.ToArray ());
 			ic.RegisterUntaggedHandler ("ESEARCH", ESearchMatchesAsync);
+
+			// Note: always register the untagged SEARCH handler because some servers will brokenly
+			// respond with "* SEARCH ..." instead of "* ESEARCH ..." even when using the extended
+			// search syntax.
+			ic.RegisterUntaggedHandler ("SEARCH", SearchMatchesAsync);
 			ic.UserData = new SearchResults ();
 
 			Engine.QueueCommand (ic);
@@ -1073,13 +1108,6 @@ namespace MailKit.Net.Imap
 			if ((Engine.Capabilities & ImapCapabilities.Sort) == 0)
 				throw new NotSupportedException ("The IMAP server does not support the SORT extension.");
 
-			if ((Engine.Capabilities & ImapCapabilities.SortDisplay) == 0) {
-				for (int i = 0; i < orderBy.Count; i++) {
-					if (orderBy[i].Type == OrderByType.DisplayFrom || orderBy[i].Type == OrderByType.DisplayTo)
-						throw new NotSupportedException ("The IMAP server does not support the SORT=DISPLAY extension.");
-				}
-			}
-
 			var optimized = query.Optimize (new ImapSearchQueryOptimizer ());
 			var expr = BuildQueryExpression (optimized, args, out charset);
 			var order = BuildSortOrder (orderBy);
@@ -1233,13 +1261,6 @@ namespace MailKit.Net.Imap
 
 			if ((Engine.Capabilities & ImapCapabilities.ESort) == 0)
 				throw new NotSupportedException ("The IMAP server does not support the ESORT extension.");
-
-			if ((Engine.Capabilities & ImapCapabilities.SortDisplay) == 0) {
-				for (int i = 0; i < orderBy.Count; i++) {
-					if (orderBy[i].Type == OrderByType.DisplayFrom || orderBy[i].Type == OrderByType.DisplayTo)
-						throw new NotSupportedException ("The IMAP server does not support the SORT=DISPLAY extension.");
-				}
-			}
 
 			var optimized = query.Optimize (new ImapSearchQueryOptimizer ());
 			var expr = BuildQueryExpression (optimized, args, out charset);

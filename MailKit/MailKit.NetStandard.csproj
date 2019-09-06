@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Description>An Open Source cross-platform .NET mail-client library that is based on MimeKit and optimized for mobile devices.</Description>
     <AssemblyTitle>MailKit</AssemblyTitle>
-    <VersionPrefix>2.1.5.1</VersionPrefix>
+    <VersionPrefix>2.3.0</VersionPrefix>
     <Authors>Jeffrey Stedfast</Authors>
-    <TargetFrameworks>netstandard1.3;netstandard1.6;netstandard2.0</TargetFrameworks>
+    <TargetFrameworks>netstandard1.3;netstandard1.6;netstandard2.0;net46;net47</TargetFrameworks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>MailKit</AssemblyName>
@@ -23,25 +23,40 @@
     <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>
     <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
     <RootNamespace>MailKit</RootNamespace>
-    <DefineConstants>$(DefineConstants);NETSTANDARD</DefineConstants>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyOriginatorKeyFile>mailkit.snk</AssemblyOriginatorKeyFile>
     <SignAssembly>true</SignAssembly>
     <PublicSign Condition=" '$(OS)' != 'Windows_NT' ">true</PublicSign>
   </PropertyGroup>
 
+  <PropertyGroup Condition=" $(TargetFramework.StartsWith('netstandard')) ">
+    <DefineConstants>$(DefineConstants);NETSTANDARD</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard2.0' ">
     <DefineConstants>$(DefineConstants);NETSTANDARD_2_0</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net46' ">
+    <DefineConstants>$(DefineConstants);SERIALIZABLE;NET_4_6</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(TargetFramework)' == 'net47' ">
+    <DefineConstants>$(DefineConstants);SERIALIZABLE;NET_4_7</DefineConstants>
+  </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition=" $(TargetFramework.StartsWith('netstandard')) ">
     <PackageReference Include="System.Runtime.Serialization.Primitives" Version="4.3.0" />
     <PackageReference Include="System.Net.NameResolution" Version="4.3.0" />
     <PackageReference Include="System.Net.Security" Version="4.3.2" />
-    <PackageReference Include="MimeKit" Version="2.1.5.1" />
   </ItemGroup>
 
-  <ItemGroup Condition=" '$(TargetFramework)' == 'netstandard1.3' Or '$(TargetFramework)' == 'netstandard1.6' Or '$(TargetFramework)' == 'netstandard2.0' ">
+  <!--ItemGroup Condition=" $(TargetFramework.StartsWith('net4')) ">
+    <Reference Include="System.Net" />
+  </ItemGroup-->
+
+  <ItemGroup>
+    <PackageReference Include="MimeKit" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="Net\SelectMode.cs;Security\KeyedHashAlgorithm.cs;Security\RandomNumberGenerator.cs" />
   </ItemGroup>
 
@@ -57,6 +72,7 @@
     <Compile Include="Net\Imap\ImapEngine.cs" />
     <Compile Include="Net\Imap\ImapEventGroup.cs" />
     <Compile Include="Net\Imap\ImapFolder.cs" />
+    <Compile Include="Net\Imap\ImapFolderAnnotations.cs" />
     <Compile Include="Net\Imap\ImapFolderConstructorArgs.cs" />
     <Compile Include="Net\Imap\ImapFolderFetch.cs" />
     <Compile Include="Net\Imap\ImapFolderFlags.cs" />
@@ -97,6 +113,7 @@
     <Compile Include="Net\NetworkStream.cs" />
     <Compile Include="Net\SocketUtils.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Search\AnnotationSearchQuery.cs" />
     <Compile Include="Search\BinarySearchQuery.cs" />
     <Compile Include="Search\DateSearchQuery.cs" />
     <Compile Include="Search\FilterSearchQuery.cs" />
@@ -104,6 +121,7 @@
     <Compile Include="Search\ISearchQueryOptimizer.cs" />
     <Compile Include="Search\NumericSearchQuery.cs" />
     <Compile Include="Search\OrderBy.cs" />
+    <Compile Include="Search\OrderByAnnotation.cs" />
     <Compile Include="Search\OrderByType.cs" />
     <Compile Include="Search\SearchOptions.cs" />
     <Compile Include="Search\SearchQuery.cs" />
@@ -115,8 +133,8 @@
     <Compile Include="Search\UnarySearchQuery.cs" />
     <Compile Include="Security\Ntlm\BitConverterLE.cs" />
     <Compile Include="Security\Ntlm\ChallengeResponse2.cs" />
-    <Compile Include="Security\Ntlm\DES.cs" />
-    <Compile Include="Security\Ntlm\HMACMD5.cs" />
+    <Compile Include="Security\Ntlm\DES.cs" Condition=" $(TargetFramework.StartsWith('netstandard')) " />
+    <Compile Include="Security\Ntlm\HMACMD5.cs" Condition=" $(TargetFramework.StartsWith('netstandard')) " />
     <Compile Include="Security\Ntlm\MD4.cs" />
     <Compile Include="Security\Ntlm\MessageBase.cs" />
     <Compile Include="Security\Ntlm\NtlmAuthLevel.cs" />
@@ -144,6 +162,12 @@
     <Compile Include="AccessRight.cs" />
     <Compile Include="AccessRights.cs" />
     <Compile Include="AlertEventArgs.cs" />
+    <Compile Include="Annotation.cs" />
+    <Compile Include="AnnotationAccess.cs" />
+    <Compile Include="AnnotationAttribute.cs" />
+    <Compile Include="AnnotationEntry.cs" />
+    <Compile Include="AnnotationsChangedEventArgs.cs" />
+    <Compile Include="AnnotationScope.cs" />
     <Compile Include="AuthenticatedEventArgs.cs" />
     <Compile Include="BodyPart.cs" />
     <Compile Include="BodyPartBasic.cs" />

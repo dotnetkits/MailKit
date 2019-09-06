@@ -33,6 +33,11 @@ namespace MailKit.Search {
 	/// </remarks>
 	public enum OrderByType {
 		/// <summary>
+		/// Sort by an annotation value.
+		/// </summary>
+		Annotation,
+
+		/// <summary>
 		/// Sort by the arrival date.
 		/// </summary>
 		Arrival,

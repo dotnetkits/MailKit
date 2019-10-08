@@ -625,6 +625,7 @@ namespace MailKit.Net.Imap {
 
 			State = ImapEngineState.Connecting;
 			QuirksMode = ImapQuirksMode.None;
+			SupportedCharsets.Add ("US-ASCII");
 			SupportedCharsets.Add ("UTF-8");
 			CapabilitiesVersion = 0;
 			QResyncEnabled = false;
@@ -719,10 +720,7 @@ namespace MailKit.Net.Imap {
 		public void Disconnect ()
 		{
 			if (Selected != null) {
-				Selected.Access = FolderAccess.None;
-				Selected.AnnotationAccess = AnnotationAccess.None;
-				Selected.AnnotationScopes = AnnotationScope.None;
-				Selected.MaxAnnotationSize = 0;
+				Selected.Reset ();
 				Selected.OnClosed ();
 				Selected = null;
 			}

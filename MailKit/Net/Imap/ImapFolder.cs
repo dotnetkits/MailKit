@@ -25,19 +25,14 @@
 //
 
 using System;
-using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 
 using MimeKit;
-using MimeKit.IO;
-using MimeKit.Utils;
+
 using MailKit.Search;
 
 namespace MailKit.Net.Imap {
@@ -149,6 +144,23 @@ namespace MailKit.Net.Imap {
 				throw new InvalidOperationException ("Indexes and '*' cannot be used while MessageNew/MessageExpunge is registered with NOTIFY for SELECTED.");
 		}
 
+		internal void Reset ()
+		{
+			// basic state
+			PermanentFlags = MessageFlags.None;
+			AcceptedFlags = MessageFlags.None;
+			Access = FolderAccess.None;
+
+			// annotate state
+			AnnotationAccess = AnnotationAccess.None;
+			AnnotationScopes = AnnotationScope.None;
+			MaxAnnotationSize = 0;
+
+			// condstore state
+			SupportsModSeq = false;
+			HighestModSeq = 0;
+		}
+
 		/// <summary>
 		/// Notifies the folder that a parent folder has been renamed.
 		/// </summary>
@@ -163,10 +175,7 @@ namespace MailKit.Net.Imap {
 			EncodedName = Engine.EncodeMailboxName (FullName);
 			Engine.FolderCache.Remove (oldEncodedName);
 			Engine.FolderCache[EncodedName] = this;
-			Access = FolderAccess.None;
-			AnnotationAccess = AnnotationAccess.None;
-			AnnotationScopes = AnnotationScope.None;
-			MaxAnnotationSize = 0;
+			Reset ();
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -274,6 +283,8 @@ namespace MailKit.Net.Imap {
 
 		async Task<FolderAccess> OpenAsync (ImapCommand ic, FolderAccess access, bool doAsync, CancellationToken cancellationToken)
 		{
+			Reset ();
+
 			if (access == FolderAccess.ReadWrite) {
 				// Note: if the server does not respond with a PERMANENTFLAGS response,
 				// then we need to assume all flags are permanent.
@@ -299,12 +310,7 @@ namespace MailKit.Net.Imap {
 			if (Engine.Selected != null && Engine.Selected != this) {
 				var folder = Engine.Selected;
 
-				folder.PermanentFlags = MessageFlags.None;
-				folder.AcceptedFlags = MessageFlags.None;
-				folder.Access = FolderAccess.None;
-				folder.AnnotationAccess = AnnotationAccess.None;
-				folder.AnnotationScopes = AnnotationScope.None;
-				folder.MaxAnnotationSize = 0;
+				folder.Reset ();
 
 				folder.OnClosed ();
 			}
@@ -592,10 +598,7 @@ namespace MailKit.Net.Imap {
 					throw ImapCommandException.Create (expunge ? "CLOSE" : "UNSELECT", ic);
 			}
 
-			Access = FolderAccess.None;
-			AnnotationAccess = AnnotationAccess.None;
-			AnnotationScopes = AnnotationScope.None;
-			MaxAnnotationSize = 0;
+			Reset ();
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -1059,12 +1062,10 @@ namespace MailKit.Net.Imap {
 			ParentFolder = parent;
 
 			FullName = Engine.DecodeMailboxName (encodedName);
-			Access = FolderAccess.None;
-			AnnotationAccess = AnnotationAccess.None;
-			AnnotationScopes = AnnotationScope.None;
-			MaxAnnotationSize = 0;
 			EncodedName = encodedName;
 			Name = name;
+
+			Reset ();
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -1194,10 +1195,7 @@ namespace MailKit.Net.Imap {
 			if (ic.Response != ImapCommandResponse.Ok)
 				throw ImapCommandException.Create ("DELETE", ic);
 
-			Access = FolderAccess.None;
-			AnnotationAccess = AnnotationAccess.None;
-			AnnotationScopes = AnnotationScope.None;
-			MaxAnnotationSize = 0;
+			Reset ();
 
 			if (Engine.Selected == this) {
 				Engine.State = ImapEngineState.Authenticated;
@@ -3656,7 +3654,7 @@ namespace MailKit.Net.Imap {
 			if ((Engine.Capabilities & ImapCapabilities.UidPlus) == 0) {
 				// get the list of messages marked for deletion that should not be expunged
 				var query = SearchQuery.Deleted.And (SearchQuery.Not (SearchQuery.Uids (uids)));
-				var unmark = await SearchAsync (query, doAsync, cancellationToken).ConfigureAwait (false);
+				var unmark = await SearchAsync (query, doAsync, false, cancellationToken).ConfigureAwait (false);
 
 				if (unmark.Count > 0) {
 					// clear the \Deleted flag on all messages except the ones that are to be expunged

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,12 +29,7 @@ using System.Net;
 using System.Text;
 using System.Globalization;
 using System.Collections.Generic;
-
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
-#else
 using System.Security.Cryptography;
-#endif
 
 namespace MailKit.Security {
 	/// <summary>

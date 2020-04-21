@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,20 @@ namespace MailKit {
 		/// </remarks>
 		/// <value><c>true</c> if the mail store supports quotas; otherwise, <c>false</c>.</value>
 		bool SupportsQuotas { get; }
+
+		/// <summary>
+		/// Get the threading algorithms supported by the mail store.
+		/// </summary>
+		/// <remarks>
+		/// The threading algorithms are queried as part of the
+		/// <a href="Overload_MailKit_IMailStore_Connect.htm">Connect</a>
+		/// and <a href="Overload_MailKit_IMailStore_Authenticate.htm">Authenticate</a> methods.
+		/// </remarks>
+		/// <example>
+		/// <code language="c#" source="Examples\ImapExamples.cs" region="Capabilities"/>
+		/// </example>
+		/// <value>The threading algorithms.</value>
+		HashSet<ThreadingAlgorithm> ThreadingAlgorithms { get; }
 
 		/// <summary>
 		/// Get the Inbox folder.

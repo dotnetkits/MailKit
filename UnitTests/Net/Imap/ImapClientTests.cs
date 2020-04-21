@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -103,6 +103,16 @@ namespace UnitTests.Net.Imap {
 			using (var reader = new StreamReader (stream)) {
 				const string expected = "This is some dummy text just to make sure this is working correctly.";
 				var text = reader.ReadToEnd ();
+
+				Assert.AreEqual (expected, text);
+			}
+		}
+
+		static async Task GetStreamsAsyncCallback (ImapFolder folder, int index, UniqueId uid, Stream stream, CancellationToken cancellationToken)
+		{
+			using (var reader = new StreamReader (stream)) {
+				const string expected = "This is some dummy text just to make sure this is working correctly.";
+				var text = await reader.ReadToEndAsync ();
 
 				Assert.AreEqual (expected, text);
 			}
@@ -1030,6 +1040,48 @@ namespace UnitTests.Net.Imap {
 					Assert.AreEqual ("System going down for a reboot.", ex.Message);
 				} catch (Exception ex) {
 					Assert.Fail ("Did not expect this exception in Open: {0}", ex);
+				}
+
+				await client.DisconnectAsync (false);
+			}
+		}
+
+		[Test]
+		public void TestUnexpectedByeAfterCapability ()
+		{
+			var commands = new List<ImapReplayCommand> ();
+			commands.Add (new ImapReplayCommand ("", Encoding.ASCII.GetBytes ("* OK Yandex IMAP4rev1 at sas8-bccc92f57f23.qloud-c.yandex.net:993 ready to talk with, 2019-Oct-18 07:41:00, 0fHtH613ZiE1\r\n")));
+			commands.Add (new ImapReplayCommand ("A00000000 CAPABILITY\r\n", Encoding.ASCII.GetBytes ("* BYE Autologout; idle for too long (1)\r\n* BYE Autologout; idle for too long (2)\r\n* BYE Autologout; idle for too long (3)\r\n")));
+
+			using (var client = new ImapClient ()) {
+				try {
+					client.ReplayConnect ("localhost", new ImapReplayStream (commands, false));
+					Assert.Fail ("Did not expect to connect");
+				} catch (ImapProtocolException ex) {
+					Assert.AreEqual ("Autologout; idle for too long (1)", ex.Message);
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect this exception in Connect: {0}", ex);
+				}
+
+				client.Disconnect (false);
+			}
+		}
+
+		[Test]
+		public async Task TestUnexpectedByeAfterCapabilityAsync ()
+		{
+			var commands = new List<ImapReplayCommand> ();
+			commands.Add (new ImapReplayCommand ("", Encoding.ASCII.GetBytes ("* OK Yandex IMAP4rev1 at sas8-bccc92f57f23.qloud-c.yandex.net:993 ready to talk with, 2019-Oct-18 07:41:00, 0fHtH613ZiE1\r\n")));
+			commands.Add (new ImapReplayCommand ("A00000000 CAPABILITY\r\n", Encoding.ASCII.GetBytes ("* BYE Autologout; idle for too long (1)\r\n* BYE Autologout; idle for too long (2)\r\n* BYE Autologout; idle for too long (3)\r\n")));
+
+			using (var client = new ImapClient ()) {
+				try {
+					await client.ReplayConnectAsync ("localhost", new ImapReplayStream (commands, true));
+					Assert.Fail ("Did not expect to connect");
+				} catch (ImapProtocolException ex) {
+					Assert.AreEqual ("Autologout; idle for too long (1)", ex.Message);
+				} catch (Exception ex) {
+					Assert.Fail ("Did not expect this exception in Connect: {0}", ex);
 				}
 
 				await client.DisconnectAsync (false);
@@ -3135,8 +3187,7 @@ namespace UnitTests.Net.Imap {
 					Assert.AreEqual ("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n", text);
 				}
 
-				var custom = new HashSet<string> ();
-				custom.Add ("$MailKit");
+				var custom = new HashSet<string> { "$MailKit" };
 
 				var unchanged1 = destination.AddFlags (uids, destination.HighestModSeq, MessageFlags.Deleted, custom, true);
 				Assert.AreEqual (14, modSeqChanged.Count, "Unexpected number of ModSeqChanged events");
@@ -3845,9 +3896,9 @@ namespace UnitTests.Net.Imap {
 				for (int i = 0; i < matches.UniqueIds.Count; i++)
 					Assert.AreEqual (expectedSortByReverseArrivalResults[i], matches.UniqueIds[i].Id);
 
-				await destination.GetStreamsAsync (UniqueIdRange.All, GetStreamsCallback);
-				await destination.GetStreamsAsync (new int[] { 0, 1, 2 }, GetStreamsCallback);
-				await destination.GetStreamsAsync (0, -1, GetStreamsCallback);
+				await destination.GetStreamsAsync (UniqueIdRange.All, GetStreamsAsyncCallback);
+				await destination.GetStreamsAsync (new int[] { 0, 1, 2 }, GetStreamsAsyncCallback);
+				await destination.GetStreamsAsync (0, -1, GetStreamsAsyncCallback);
 
 				await destination.ExpungeAsync ();
 				Assert.AreEqual (7, destination.HighestModSeq);

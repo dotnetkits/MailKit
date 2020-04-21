@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,6 @@
 using System;
 using System.Net;
 using System.Text;
-
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
-#endif
 
 namespace MailKit.Security {
 	/// <summary>
@@ -264,10 +260,10 @@ namespace MailKit.Security {
 		/// </exception>
 		protected override byte[] Challenge (byte[] token, int startIndex, int length)
 		{
-			byte[] challenge;
-
 			if (IsAuthenticated)
 				throw new InvalidOperationException ();
+
+			byte[] challenge = null;
 
 			switch (state) {
 			case LoginState.UserName:
@@ -281,8 +277,6 @@ namespace MailKit.Security {
 				challenge = encoding.GetBytes (Credentials.Password);
 				IsAuthenticated = true;
 				break;
-			default:
-				throw new IndexOutOfRangeException ();
 			}
 
 			return challenge;

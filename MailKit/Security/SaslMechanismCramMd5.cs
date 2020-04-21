@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ using System;
 using System.Net;
 using System.Text;
 
-#if NETFX_CORE || NETSTANDARD
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 using MD5 = MimeKit.Cryptography.MD5;
 #else
 using System.Security.Cryptography;

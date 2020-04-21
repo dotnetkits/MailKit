@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,6 @@ using System;
 using System.IO;
 using System.Text;
 
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
-#endif
-
 namespace MailKit {
 	/// <summary>
 	/// A default protocol logger for logging the communication between a client and server.
@@ -52,7 +48,6 @@ namespace MailKit {
 		bool clientMidline;
 		bool serverMidline;
 
-#if !NETFX_CORE
 		/// <summary>
 		/// Initializes a new instance of the <see cref="MailKit.ProtocolLogger"/> class.
 		/// </summary>
@@ -68,7 +63,6 @@ namespace MailKit {
 		{
 			stream = File.Open (fileName, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.Read);
 		}
-#endif
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="MailKit.ProtocolLogger"/> class.

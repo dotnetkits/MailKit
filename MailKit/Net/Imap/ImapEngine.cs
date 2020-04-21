@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,13 +33,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
-using EncoderExceptionFallback = Portable.Text.EncoderExceptionFallback;
-using DecoderExceptionFallback = Portable.Text.DecoderExceptionFallback;
-using DecoderFallbackException = Portable.Text.DecoderFallbackException;
-#endif
 
 using MimeKit;
 
@@ -103,8 +96,11 @@ namespace MailKit.Net.Imap {
 		Exchange,
 		GMail,
 		ProtonMail,
+		SmarterMail,
+		SunMicrosystems,
 		UW,
-		Yahoo
+		Yahoo,
+		Yandex
 	}
 
 	class ImapFolderNameComparer : IEqualityComparer<string>
@@ -703,6 +699,10 @@ namespace MailKit.Net.Imap {
 					QuirksMode = ImapQuirksMode.GMail;
 				else if (text.Contains (" IMAP4rev1 2007f.") || text.Contains (" Panda IMAP "))
 					QuirksMode = ImapQuirksMode.UW;
+				else if (text.Contains ("SmarterMail"))
+					QuirksMode = ImapQuirksMode.SmarterMail;
+				else if (text.Contains ("Yandex IMAP4rev1 "))
+					QuirksMode = ImapQuirksMode.Yandex;
 
 				State = state;
 			} catch {
@@ -753,7 +753,7 @@ namespace MailKit.Net.Imap {
 				} while (!complete);
 
 				count = (int) memory.Length;
-#if !NETFX_CORE && !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 				buf = memory.GetBuffer ();
 #else
 				buf = memory.ToArray ();
@@ -991,7 +991,7 @@ namespace MailKit.Net.Imap {
 				}
 
 				nread = (int) memory.Length;
-#if !NETFX_CORE && !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 				buf = memory.GetBuffer ();
 #else
 				buf = memory.ToArray ();
@@ -1064,8 +1064,9 @@ namespace MailKit.Net.Imap {
 
 		async Task UpdateCapabilitiesAsync (ImapTokenType sentinel, bool doAsync, CancellationToken cancellationToken)
 		{
+			// Clear the extensions except STARTTLS so that this capability stays set after a STARTTLS command.
 			ProtocolVersion = ImapProtocolVersion.Unknown;
-			Capabilities = ImapCapabilities.None;
+			Capabilities &= ImapCapabilities.StartTLS;
 			AuthenticationMechanisms.Clear ();
 			CompressionAlgorithms.Clear ();
 			ThreadingAlgorithms.Clear ();
@@ -1172,6 +1173,7 @@ namespace MailKit.Net.Imap {
 					case "XLIST":                 Capabilities |= ImapCapabilities.XList; break;
 					case "X-GM-EXT-1":            Capabilities |= ImapCapabilities.GMailExt1; QuirksMode = ImapQuirksMode.GMail; break;
 					case "XSTOP":                 QuirksMode = ImapQuirksMode.ProtonMail; break;
+					case "X-SUN-IMAP":            QuirksMode = ImapQuirksMode.SunMicrosystems; break;
 					case "XYMHIGHESTMODSEQ":      QuirksMode = ImapQuirksMode.Yahoo; break;
 					}
 				}
@@ -1465,7 +1467,14 @@ namespace MailKit.Net.Imap {
 			case ImapResponseCodeType.UidNext:
 				var next = (UidNextResponseCode) code;
 
-				next.Uid = new UniqueId (ParseNumber (token, true, GenericResponseCodeSyntaxErrorFormat, "UIDNEXT", token));
+				// Note: we allow '0' here because some servers have been known to send "* OK [UIDNEXT 0]".
+				// The *probable* explanation here is that the folder has never been opened and/or no messages
+				// have ever been delivered (yet) to that mailbox and so the UIDNEXT has not (yet) been
+				// initialized.
+				//
+				// See https://github.com/jstedfast/MailKit/issues/1010 for an example.
+				var uid = ParseNumber (token, false, GenericResponseCodeSyntaxErrorFormat, "UIDNEXT", token);
+				next.Uid = uid > 0 ? new UniqueId (uid) : UniqueId.Invalid;
 				token = await ReadTokenAsync (doAsync, cancellationToken).ConfigureAwait (false);
 				break;
 			case ImapResponseCodeType.UidValidity:
@@ -1473,7 +1482,7 @@ namespace MailKit.Net.Imap {
 
 				// Note: we allow '0' here because some servers have been known to send "* OK [UIDVALIDITY 0]".
 				// The *probable* explanation here is that the folder has never been opened and/or no messages
-				// have ever been delivered (yet) to that mailbox and so the UNIDVALIDITY has not (yet) been
+				// have ever been delivered (yet) to that mailbox and so the UIDVALIDITY has not (yet) been
 				// initialized.
 				//
 				// See https://github.com/jstedfast/MailKit/issues/150 for an example.
@@ -1901,6 +1910,15 @@ namespace MailKit.Net.Imap {
 				}
 
 				current.Bye = true;
+
+				// Note: Yandex IMAP is broken and will continue sending untagged BYE responses until the client closes
+				// the connection. In order to avoid this scenario, consider this command complete as soon as we receive
+				// the very first untagged BYE response and do not hold out hoping for a tagged response following the
+				// untagged BYE.
+				//
+				// See https://github.com/jstedfast/MailKit/issues/938 for details.
+				if (QuirksMode == ImapQuirksMode.Yandex && !current.Logout)
+					current.Status = ImapCommandStatus.Complete;
 				break;
 			case "CAPABILITY":
 				await UpdateCapabilitiesAsync (ImapTokenType.Eoln, doAsync, cancellationToken);
@@ -2059,7 +2077,7 @@ namespace MailKit.Net.Imap {
 				}
 
 				if (current.Bye && !current.Logout)
-					Disconnect ();
+					throw new ImapProtocolException ("Bye.");
 			} catch (ImapProtocolException) {
 				var ic = current;
 
@@ -2757,12 +2775,17 @@ namespace MailKit.Net.Imap {
 			return mailboxName.Length > 0;
 		}
 
-		public async Task<HeaderList> ParseHeadersAsync (Stream stream, bool doAsync, CancellationToken cancellationToken)
+		void InitializeParser (Stream stream, bool persistent)
 		{
 			if (parser == null)
-				parser = new MimeParser (ParserOptions.Default, stream);
+				parser = new MimeParser (ParserOptions.Default, stream, persistent);
 			else
-				parser.SetStream (ParserOptions.Default, stream);
+				parser.SetStream (ParserOptions.Default, stream, persistent);
+		}
+
+		public async Task<HeaderList> ParseHeadersAsync (Stream stream, bool doAsync, CancellationToken cancellationToken)
+		{
+			InitializeParser (stream, false);
 
 			if (doAsync)
 				return await parser.ParseHeadersAsync (cancellationToken).ConfigureAwait (false);
@@ -2772,10 +2795,7 @@ namespace MailKit.Net.Imap {
 
 		public async Task<MimeMessage> ParseMessageAsync (Stream stream, bool persistent, bool doAsync, CancellationToken cancellationToken)
 		{
-			if (parser == null)
-				parser = new MimeParser (ParserOptions.Default, stream, persistent);
-			else
-				parser.SetStream (ParserOptions.Default, stream, persistent);
+			InitializeParser (stream, persistent);
 
 			if (doAsync)
 				return await parser.ParseMessageAsync (cancellationToken).ConfigureAwait (false);
@@ -2785,10 +2805,7 @@ namespace MailKit.Net.Imap {
 
 		public async Task<MimeEntity> ParseEntityAsync (Stream stream, bool persistent, bool doAsync, CancellationToken cancellationToken)
 		{
-			if (parser == null)
-				parser = new MimeParser (ParserOptions.Default, stream, persistent);
-			else
-				parser.SetStream (ParserOptions.Default, stream, persistent);
+			InitializeParser (stream, persistent);
 
 			if (doAsync)
 				return await parser.ParseEntityAsync (cancellationToken).ConfigureAwait (false);

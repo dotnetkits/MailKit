@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,15 +29,10 @@ using System.Net;
 using System.Text;
 using System.Globalization;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 using MD5 = MimeKit.Cryptography.MD5;
-#elif NETSTANDARD
-using System.Security.Cryptography;
-using MD5 = MimeKit.Cryptography.MD5;
-#else
-using System.Security.Cryptography;
 #endif
 
 namespace MailKit.Security {
@@ -224,10 +219,10 @@ namespace MailKit.Security {
 					throw new SaslException (MechanismName, SaslErrorCode.IncorrectHash, "Server response did not contain the expected hash.");
 
 				IsAuthenticated = true;
-				return new byte[0];
-			default:
-				throw new IndexOutOfRangeException ("state");
+				break;
 			}
+
+			return null;
 		}
 
 		/// <summary>

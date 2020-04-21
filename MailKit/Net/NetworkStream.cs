@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,19 +34,24 @@ namespace MailKit.Net
 {
 	class NetworkStream : Stream
 	{
-		readonly SocketAsyncEventArgs args;
-		readonly Socket socket;
+		SocketAsyncEventArgs send;
+		SocketAsyncEventArgs recv;
 		bool ownsSocket;
-		bool closed;
+		bool connected;
 
 		public NetworkStream (Socket socket, bool ownsSocket)
 		{
-			args = new SocketAsyncEventArgs ();
-			args.Completed += AsyncOperationCompleted;
-			args.AcceptSocket = socket;
+			send = new SocketAsyncEventArgs ();
+			send.Completed += AsyncOperationCompleted;
+			send.AcceptSocket = socket;
+
+			recv = new SocketAsyncEventArgs ();
+			recv.Completed += AsyncOperationCompleted;
+			recv.AcceptSocket = socket;
 
 			this.ownsSocket = ownsSocket;
-			this.socket = socket;
+			connected = socket.Connected;
+			Socket = socket;
 		}
 
 		~NetworkStream ()
@@ -54,16 +59,20 @@ namespace MailKit.Net
 			Dispose (false);
 		}
 
+		public Socket Socket {
+			get; private set;
+		}
+
 		public bool DataAvailable {
-			get { return socket.Available > 0; }
+			get { return connected && Socket.Available > 0; }
 		}
 
 		public override bool CanRead {
-			get { return true; }
+			get { return connected; }
 		}
 
 		public override bool CanWrite {
-			get { return true; }
+			get { return connected; }
 		}
 
 		public override bool CanSeek {
@@ -71,7 +80,7 @@ namespace MailKit.Net
 		}
 
 		public override bool CanTimeout {
-			get { return true; }
+			get { return connected; }
 		}
 
 		public override long Length {
@@ -85,7 +94,7 @@ namespace MailKit.Net
 
 		public override int ReadTimeout {
 			get {
-				int timeout = socket.ReceiveTimeout;
+				int timeout = Socket.ReceiveTimeout;
 
 				return timeout == 0 ? Timeout.Infinite : timeout;
 			}
@@ -93,13 +102,13 @@ namespace MailKit.Net
 				if (value <= 0 && value != Timeout.Infinite)
 					throw new ArgumentOutOfRangeException (nameof (value));
 
-				socket.ReceiveTimeout = value;
+				Socket.ReceiveTimeout = value;
 			}
 		}
 
 		public override int WriteTimeout {
 			get {
-				int timeout = socket.SendTimeout;
+				int timeout = Socket.SendTimeout;
 
 				return timeout == 0 ? Timeout.Infinite : timeout;
 			}
@@ -107,7 +116,7 @@ namespace MailKit.Net
 				if (value <= 0 && value != Timeout.Infinite)
 					throw new ArgumentOutOfRangeException (nameof (value));
 
-				socket.SendTimeout = value;
+				Socket.SendTimeout = value;
 			}
 		}
 
@@ -126,19 +135,22 @@ namespace MailKit.Net
 		void Disconnect ()
 		{
 			try {
-				socket.Dispose ();
+				Socket.Dispose ();
 			} catch {
 				return;
 			} finally {
-				args.Dispose ();
-				closed = true;
+				connected = false;
+				send.Dispose ();
+				send = null;
+				recv.Dispose ();
+				recv = null;
 			}
 		}
 
 		public override int Read (byte[] buffer, int offset, int count)
 		{
 			try {
-				return socket.Receive (buffer, offset, count, SocketFlags.None);
+				return Socket.Receive (buffer, offset, count, SocketFlags.None);
 			} catch (SocketException ex) {
 				throw new IOException (ex.Message, ex);
 			}
@@ -150,27 +162,31 @@ namespace MailKit.Net
 
 			var tcs = new TaskCompletionSource<bool> ();
 
-			using (var registration = cancellationToken.Register (() => tcs.TrySetCanceled (), false)) {
-				args.SetBuffer (buffer, offset, count);
-				args.UserToken = tcs;
+			using (var timeout = new CancellationTokenSource (ReadTimeout)) {
+				using (var linked = CancellationTokenSource.CreateLinkedTokenSource (cancellationToken, timeout.Token)) {
+					using (var registration = linked.Token.Register (() => tcs.TrySetCanceled (), false)) {
+						recv.SetBuffer (buffer, offset, count);
+						recv.UserToken = tcs;
 
-				if (!socket.ReceiveAsync (args))
-					AsyncOperationCompleted (null, args);
+						if (!Socket.ReceiveAsync (recv))
+							AsyncOperationCompleted (null, recv);
 
-				try {
-					await tcs.Task.ConfigureAwait (false);
-					return args.BytesTransferred;
-				} catch (OperationCanceledException) {
-					if (socket.Connected)
-						socket.Shutdown (SocketShutdown.Both);
+						try {
+							await tcs.Task.ConfigureAwait (false);
+							return recv.BytesTransferred;
+						} catch (OperationCanceledException) {
+							if (Socket.Connected)
+								Socket.Shutdown (SocketShutdown.Both);
 
-					Disconnect ();
-					throw;
-				} catch (Exception ex) {
-					Disconnect ();
-					if (ex is SocketException)
-						throw new IOException (ex.Message, ex);
-					throw;
+							Disconnect ();
+							throw;
+						} catch (Exception ex) {
+							Disconnect ();
+							if (ex is SocketException)
+								throw new IOException (ex.Message, ex);
+							throw;
+						}
+					}
 				}
 			}
 		}
@@ -178,7 +194,7 @@ namespace MailKit.Net
 		public override void Write (byte[] buffer, int offset, int count)
 		{
 			try {
-				socket.Send (buffer, offset, count, SocketFlags.None);
+				Socket.Send (buffer, offset, count, SocketFlags.None);
 			} catch (SocketException ex) {
 				throw new IOException (ex.Message, ex);
 			}
@@ -190,26 +206,30 @@ namespace MailKit.Net
 
 			var tcs = new TaskCompletionSource<bool> ();
 
-			using (var registration = cancellationToken.Register (() => tcs.TrySetCanceled (), false)) {
-				args.SetBuffer (buffer, offset, count);
-				args.UserToken = tcs;
+			using (var timeout = new CancellationTokenSource (WriteTimeout)) {
+				using (var linked = CancellationTokenSource.CreateLinkedTokenSource (cancellationToken, timeout.Token)) {
+					using (var registration = linked.Token.Register (() => tcs.TrySetCanceled (), false)) {
+						send.SetBuffer (buffer, offset, count);
+						send.UserToken = tcs;
 
-				if (!socket.SendAsync (args))
-					AsyncOperationCompleted (null, args);
+						if (!Socket.SendAsync (send))
+							AsyncOperationCompleted (null, send);
 
-				try {
-					await tcs.Task.ConfigureAwait (false);
-				} catch (OperationCanceledException) {
-					if (socket.Connected)
-						socket.Shutdown (SocketShutdown.Both);
+						try {
+							await tcs.Task.ConfigureAwait (false);
+						} catch (OperationCanceledException) {
+							if (Socket.Connected)
+								Socket.Shutdown (SocketShutdown.Both);
 
-					Disconnect ();
-					throw;
-				} catch (Exception ex) {
-					Disconnect ();
-					if (ex is SocketException)
-						throw new IOException (ex.Message, ex);
-					throw;
+							Disconnect ();
+							throw;
+						} catch (Exception ex) {
+							Disconnect ();
+							if (ex is SocketException)
+								throw new IOException (ex.Message, ex);
+							throw;
+						}
+					}
 				}
 			}
 		}
@@ -233,11 +253,43 @@ namespace MailKit.Net
 			throw new NotSupportedException ();
 		}
 
+		public static NetworkStream Get (Stream stream)
+		{
+			if (stream is CompressedStream compressed)
+				stream = compressed.InnerStream;
+
+			if (stream is SslStream ssl)
+				stream = ssl.InnerStream;
+
+			return stream as NetworkStream;
+		}
+
+		public void Poll (SelectMode mode, CancellationToken cancellationToken)
+		{
+			if (!cancellationToken.CanBeCanceled)
+				return;
+
+			do {
+				cancellationToken.ThrowIfCancellationRequested ();
+				// wait 1/4 second and then re-check for cancellation
+			} while (!Socket.Poll (250000, mode));
+
+			cancellationToken.ThrowIfCancellationRequested ();
+		}
+
 		protected override void Dispose (bool disposing)
 		{
-			if (disposing && ownsSocket && !closed) {
-				ownsSocket = false;
-				Disconnect ();
+			if (disposing) {
+				if (ownsSocket && connected) {
+					ownsSocket = false;
+					Disconnect ();
+				} else {
+					send?.Dispose ();
+					send = null;
+
+					recv?.Dispose ();
+					recv = null;
+				}
 			}
 
 			base.Dispose (disposing);

@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,13 +31,6 @@ using System.Threading;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Collections.Generic;
-
-#if NETFX_CORE
-using Encoding = Portable.Text.Encoding;
-using EncoderExceptionFallback = Portable.Text.EncoderExceptionFallback;
-using DecoderExceptionFallback = Portable.Text.DecoderExceptionFallback;
-using DecoderFallbackException = Portable.Text.DecoderFallbackException;
-#endif
 
 namespace MailKit.Net.Pop3 {
 	/// <summary>
@@ -332,7 +325,7 @@ namespace MailKit.Net.Pop3 {
 				} while (!complete);
 
 				count = (int) memory.Length;
-#if !NETFX_CORE && !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 				buf = memory.GetBuffer ();
 #else
 				buf = memory.ToArray ();
@@ -633,8 +626,8 @@ namespace MailKit.Net.Pop3 {
 			if (stream == null)
 				throw new InvalidOperationException ();
 
-			// clear all CAPA response capabilities (except the APOP and USER capabilities)
-			Capabilities &= Pop3Capabilities.Apop | Pop3Capabilities.User;
+			// Clear all CAPA response capabilities (except the APOP, USER, and STLS capabilities).
+			Capabilities &= Pop3Capabilities.Apop | Pop3Capabilities.User | Pop3Capabilities.StartTLS;
 			AuthenticationMechanisms.Clear ();
 			Implementation = null;
 			ExpirePolicy = 0;

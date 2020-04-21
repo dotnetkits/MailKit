@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,23 +29,16 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-
-#if NETFX_CORE
-using Windows.Networking;
-using Windows.Networking.Sockets;
-using Windows.Storage.Streams;
-using Encoding = Portable.Text.Encoding;
-#else
 using System.Net.Sockets;
 using System.Net.Security;
+using System.Threading.Tasks;
+using System.Collections.Generic;
 using System.Security.Cryptography.X509Certificates;
 
-using NetworkStream = MailKit.Net.NetworkStream;
-#endif
-
 using MailKit.Security;
+
+using SslStream = MailKit.Net.SslStream;
+using NetworkStream = MailKit.Net.NetworkStream;
 
 namespace MailKit.Net.Imap {
 	/// <summary>
@@ -65,14 +58,12 @@ namespace MailKit.Net.Imap {
 	/// <example>
 	/// <code language="c#" source="Examples\ImapExamples.cs" region="DownloadBodyParts"/>
 	/// </example>
-	public partial class ImapClient : MailStore
+	public partial class ImapClient : MailStore, IImapClient
 	{
 		static readonly char[] ReservedUriCharacters = { ';', '/', '?', ':', '@', '&', '=', '+', '$', ',', '%' };
 		const string HexAlphabet = "0123456789ABCDEF";
+
 		readonly ImapEngine engine;
-#if NETFX_CORE
-		StreamSocket socket;
-#endif
 		int timeout = 2 * 60 * 1000;
 		string identifier;
 		bool disconnecting;
@@ -255,20 +246,18 @@ namespace MailKit.Net.Imap {
 			return folder;
 		}
 
-#if !NETFX_CORE
 		bool ValidateRemoteCertificate (object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
 		{
 			if (ServerCertificateValidationCallback != null)
 				return ServerCertificateValidationCallback (engine.Uri.Host, certificate, chain, sslPolicyErrors);
 
-#if !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 			if (ServicePointManager.ServerCertificateValidationCallback != null)
 				return ServicePointManager.ServerCertificateValidationCallback (engine.Uri.Host, certificate, chain, sslPolicyErrors);
 #endif
 
 			return DefaultServerCertificateValidationCallback (engine.Uri.Host, certificate, chain, sslPolicyErrors);
 		}
-#endif
 
 		async Task CompressAsync (bool doAsync, CancellationToken cancellationToken)
 		{
@@ -598,8 +587,8 @@ namespace MailKit.Net.Imap {
 		/// <example>
 		/// <code language="c#" source="Examples\ImapExamples.cs" region="Capabilities"/>
 		/// </example>
-		/// <value>The authentication mechanisms.</value>
-		public HashSet<ThreadingAlgorithm> ThreadingAlgorithms {
+		/// <value>The supported threading algorithms.</value>
+		public override HashSet<ThreadingAlgorithm> ThreadingAlgorithms {
 			get { return engine.ThreadingAlgorithms; }
 		}
 
@@ -1120,7 +1109,7 @@ namespace MailKit.Net.Imap {
 				throw new ArgumentNullException (nameof (replayStream));
 
 			engine.Uri = new Uri ($"imap://{host}:143");
-			engine.ConnectAsync (new ImapStream (replayStream, null, ProtocolLogger), false, cancellationToken).GetAwaiter ().GetResult ();
+			engine.ConnectAsync (new ImapStream (replayStream, ProtocolLogger), false, cancellationToken).GetAwaiter ().GetResult ();
 			engine.TagPrefix = 'A';
 			secure = false;
 
@@ -1147,7 +1136,7 @@ namespace MailKit.Net.Imap {
 				throw new ArgumentNullException (nameof (replayStream));
 
 			engine.Uri = new Uri ($"imap://{host}:143");
-			await engine.ConnectAsync (new ImapStream (replayStream, null, ProtocolLogger), true, cancellationToken).ConfigureAwait (false);
+			await engine.ConnectAsync (new ImapStream (replayStream, ProtocolLogger), true, cancellationToken).ConfigureAwait (false);
 			engine.TagPrefix = 'A';
 			secure = false;
 
@@ -1225,7 +1214,6 @@ namespace MailKit.Net.Imap {
 
 			ComputeDefaultValues (host, ref port, ref options, out uri, out starttls);
 
-#if !NETFX_CORE
 			var socket = await ConnectSocket (host, port, doAsync, cancellationToken).ConfigureAwait (false);
 
 			engine.Uri = uri;
@@ -1237,7 +1225,7 @@ namespace MailKit.Net.Imap {
 					if (doAsync) {
 						await ssl.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).ConfigureAwait (false);
 					} else {
-#if NETSTANDARD
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 						ssl.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).GetAwaiter ().GetResult ();
 #else
 						ssl.AuthenticateAsClient (host, ClientCertificates, SslProtocols, CheckCertificateRevocation);
@@ -1246,7 +1234,7 @@ namespace MailKit.Net.Imap {
 				} catch (Exception ex) {
 					ssl.Dispose ();
 
-					throw SslHandshakeException.Create (ex, false);
+					throw SslHandshakeException.Create (this, ex, false);
 				}
 
 				secure = true;
@@ -1255,30 +1243,6 @@ namespace MailKit.Net.Imap {
 				stream = new NetworkStream (socket, true);
 				secure = false;
 			}
-#else
-			var protection = options == SecureSocketOptions.SslOnConnect ? SocketProtectionLevel.Tls12 : SocketProtectionLevel.PlainSocket;
-			socket = new StreamSocket ();
-
-			try {
-				cancellationToken.ThrowIfCancellationRequested ();
-				if (doAsync)
-					await socket.ConnectAsync (new HostName (host), port.ToString (), protection).AsTask (cancellationToken).ConfigureAwait (false);
-				else
-					socket.ConnectAsync (new HostName (host), port.ToString (), protection).AsTask (cancellationToken).GetAwaiter ().GetResult ();
-			} catch (Exception ex) {
-				socket.Dispose ();
-				socket = null;
-
-				if (protection != SocketProtectionLevel.PlainSocket)
-					throw SslHandshakeException.Create (ex, false);
-
-				throw;
-			}
-
-			stream = new DuplexStream (socket.InputStream.AsStreamForRead (0), socket.OutputStream.AsStreamForWrite (0));
-			secure = options == SecureSocketOptions.SslOnConnect;
-			engine.Uri = uri;
-#endif
 
 			if (stream.CanTimeout) {
 				stream.WriteTimeout = timeout;
@@ -1290,16 +1254,13 @@ namespace MailKit.Net.Imap {
 			} catch {
 				stream.Dispose ();
 				secure = false;
-#if NETFX_CORE
-				socket = null;
-#endif
 				throw;
 			}
 
 			connecting = true;
 
 			try {
-				await engine.ConnectAsync (new ImapStream (stream, socket, ProtocolLogger), doAsync, cancellationToken).ConfigureAwait (false);
+				await engine.ConnectAsync (new ImapStream (stream, ProtocolLogger), doAsync, cancellationToken).ConfigureAwait (false);
 			} catch {
 				connecting = false;
 				secure = false;
@@ -1321,27 +1282,20 @@ namespace MailKit.Net.Imap {
 
 					if (ic.Response == ImapCommandResponse.Ok) {
 						try {
-#if !NETFX_CORE
 							var tls = new SslStream (stream, false, ValidateRemoteCertificate);
 							engine.Stream.Stream = tls;
 
 							if (doAsync) {
 								await tls.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).ConfigureAwait (false);
 							} else {
-#if NETSTANDARD
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 								tls.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).GetAwaiter ().GetResult ();
 #else
 								tls.AuthenticateAsClient (host, ClientCertificates, SslProtocols, CheckCertificateRevocation);
 #endif
 							}
-#else
-							if (doAsync)
-								await socket.UpgradeToSslAsync (SocketProtectionLevel.Tls12, new HostName (host)).AsTask (cancellationToken).ConfigureAwait (false);
-							else
-								socket.UpgradeToSslAsync (SocketProtectionLevel.Tls12, new HostName (host)).AsTask (cancellationToken).GetAwaiter ().GetResult ();
-#endif
 						} catch (Exception ex) {
-							throw SslHandshakeException.Create (ex, true);
+							throw SslHandshakeException.Create (this, ex, true);
 						}
 
 						secure = true;
@@ -1437,8 +1391,7 @@ namespace MailKit.Net.Imap {
 			ConnectAsync (host, port, options, false, cancellationToken).GetAwaiter ().GetResult ();
 		}
 
-#if !NETFX_CORE
-		async Task ConnectAsync (Stream stream, Socket socket, string host, int port, SecureSocketOptions options, bool doAsync, CancellationToken cancellationToken)
+		async Task ConnectAsync (Stream stream, string host, int port, SecureSocketOptions options, bool doAsync, CancellationToken cancellationToken)
 		{
 			if (stream == null)
 				throw new ArgumentNullException (nameof (stream));
@@ -1472,7 +1425,7 @@ namespace MailKit.Net.Imap {
 					if (doAsync) {
 						await ssl.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).ConfigureAwait (false);
 					} else {
-#if NETSTANDARD
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 						ssl.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).GetAwaiter ().GetResult ();
 #else
 						ssl.AuthenticateAsClient (host, ClientCertificates, SslProtocols, CheckCertificateRevocation);
@@ -1481,7 +1434,7 @@ namespace MailKit.Net.Imap {
 				} catch (Exception ex) {
 					ssl.Dispose ();
 
-					throw SslHandshakeException.Create (ex, false);
+					throw SslHandshakeException.Create (this, ex, false);
 				}
 
 				network = ssl;
@@ -1507,7 +1460,7 @@ namespace MailKit.Net.Imap {
 			connecting = true;
 
 			try {
-				await engine.ConnectAsync (new ImapStream (network, socket, ProtocolLogger), doAsync, cancellationToken).ConfigureAwait (false);
+				await engine.ConnectAsync (new ImapStream (network, ProtocolLogger), doAsync, cancellationToken).ConfigureAwait (false);
 			} catch {
 				connecting = false;
 				throw;
@@ -1534,14 +1487,14 @@ namespace MailKit.Net.Imap {
 							if (doAsync) {
 								await tls.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).ConfigureAwait (false);
 							} else {
-#if NETSTANDARD
+#if NETSTANDARD1_3 || NETSTANDARD1_6
 								tls.AuthenticateAsClientAsync (host, ClientCertificates, SslProtocols, CheckCertificateRevocation).GetAwaiter ().GetResult ();
 #else
 								tls.AuthenticateAsClient (host, ClientCertificates, SslProtocols, CheckCertificateRevocation);
 #endif
 							}
 						} catch (Exception ex) {
-							throw SslHandshakeException.Create (ex, true);
+							throw SslHandshakeException.Create (this, ex, true);
 						}
 
 						secure = true;
@@ -1579,7 +1532,7 @@ namespace MailKit.Net.Imap {
 			if (!socket.Connected)
 				throw new ArgumentException ("The socket is not connected.", nameof (socket));
 
-			return ConnectAsync (new NetworkStream (socket, true), socket, host, port, options, doAsync, cancellationToken);
+			return ConnectAsync (new NetworkStream (socket, true), host, port, options, doAsync, cancellationToken);
 		}
 
 		/// <summary>
@@ -1709,9 +1662,8 @@ namespace MailKit.Net.Imap {
 		/// </exception>
 		public override void Connect (Stream stream, string host, int port = 0, SecureSocketOptions options = SecureSocketOptions.Auto, CancellationToken cancellationToken = default (CancellationToken))
 		{
-			ConnectAsync (stream, null, host, port, options, false, cancellationToken).GetAwaiter ().GetResult ();
+			ConnectAsync (stream, host, port, options, false, cancellationToken).GetAwaiter ().GetResult ();
 		}
-#endif
 
 		async Task DisconnectAsync (bool quit, bool doAsync, CancellationToken cancellationToken)
 		{
@@ -1730,11 +1682,6 @@ namespace MailKit.Net.Imap {
 				} catch (IOException) {
 				}
 			}
-
-#if NETFX_CORE
-			socket.Dispose ();
-			socket = null;
-#endif
 
 			disconnecting = true;
 
@@ -1822,24 +1769,6 @@ namespace MailKit.Net.Imap {
 			NoOpAsync (false, cancellationToken).GetAwaiter ().GetResult ();
 		}
 
-		static void IdleComplete (object state)
-		{
-			var ctx = (ImapIdleContext) state;
-
-			if (ctx.Engine.State == ImapEngineState.Idle) {
-				var buf = Encoding.ASCII.GetBytes ("DONE\r\n");
-
-				try {
-					ctx.Engine.Stream.Write (buf, 0, buf.Length, ctx.CancellationToken);
-					ctx.Engine.Stream.Flush (ctx.CancellationToken);
-				} catch {
-					return;
-				}
-
-				ctx.Engine.State = ImapEngineState.Selected;
-			}
-		}
-
 		async Task IdleAsync (CancellationToken doneToken, bool doAsync, CancellationToken cancellationToken)
 		{
 			if (!doneToken.CanBeCanceled)
@@ -1860,15 +1789,8 @@ namespace MailKit.Net.Imap {
 
 			using (var context = new ImapIdleContext (engine, doneToken, cancellationToken)) {
 				var ic = engine.QueueCommand (cancellationToken, null, "IDLE\r\n");
+				ic.ContinuationHandler = context.ContinuationHandler;
 				ic.UserData = context;
-
-				ic.ContinuationHandler = (imap, cmd, text, xdoAsync) => {
-					imap.State = ImapEngineState.Idle;
-
-					doneToken.Register (IdleComplete, context);
-
-					return Task.FromResult (true);
-				};
 
 				await engine.RunAsync (ic, doAsync).ConfigureAwait (false);
 
@@ -2683,12 +2605,6 @@ namespace MailKit.Net.Imap {
 				engine.Disconnected -= OnEngineDisconnected;
 				engine.Alert -= OnEngineAlert;
 				engine.Dispose ();
-
-#if NETFX_CORE
-				if (socket != null)
-					socket.Dispose ();
-#endif
-
 				disposed = true;
 			}
 

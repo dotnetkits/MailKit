@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,26 +28,14 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading;
+using System.Net.Sockets;
+using System.Net.Security;
 using System.Threading.Tasks;
 
-using Buffer = System.Buffer;
-
-#if NETFX_CORE
-using Windows.Storage.Streams;
-using Windows.Networking.Sockets;
-using Encoding = Portable.Text.Encoding;
-using Socket = Windows.Networking.Sockets.StreamSocket;
-using EncoderExceptionFallback = Portable.Text.EncoderExceptionFallback;
-using DecoderExceptionFallback = Portable.Text.DecoderExceptionFallback;
-using DecoderFallbackException = Portable.Text.DecoderFallbackException;
-#else
-using System.Net.Security;
-using System.Net.Sockets;
-
-using NetworkStream = MailKit.Net.NetworkStream;
-#endif
-
 using MimeKit.IO;
+
+using Buffer = System.Buffer;
+using NetworkStream = MailKit.Net.NetworkStream;
 
 namespace MailKit.Net.Smtp {
 	/// <summary>
@@ -89,14 +77,12 @@ namespace MailKit.Net.Smtp {
 		/// Creates a new <see cref="SmtpStream"/>.
 		/// </remarks>
 		/// <param name="source">The underlying network stream.</param>
-		/// <param name="socket">The underlying network socket.</param>
 		/// <param name="protocolLogger">The protocol logger.</param>
-		public SmtpStream (Stream source, Socket socket, IProtocolLogger protocolLogger)
+		public SmtpStream (Stream source, IProtocolLogger protocolLogger)
 		{
 			logger = protocolLogger;
 			IsConnected = true;
 			Stream = source;
-			Socket = socket;
 		}
 
 		/// <summary>
@@ -108,17 +94,6 @@ namespace MailKit.Net.Smtp {
 		/// <value>The underlying network stream.</value>
 		public Stream Stream {
 			get; internal set;
-		}
-
-		/// <summary>
-		/// Get the underlying network socket.
-		/// </summary>
-		/// <remarks>
-		/// Gets the underlying network socket.
-		/// </remarks>
-		/// <value>The underlying network socket.</value>
-		public Socket Socket {
-			get; private set;
 		}
 
 		/// <summary>
@@ -242,36 +217,6 @@ namespace MailKit.Net.Smtp {
 			get { return Stream.Length; }
 		}
 
-		void DropConnection ()
-		{
-			if (Socket != null) {
-				try {
-					Socket.Dispose ();
-				} catch {
-					return;
-				}
-			}
-		}
-
-		void Poll (SelectMode mode, CancellationToken cancellationToken)
-		{
-#if NETFX_CORE
-			cancellationToken.ThrowIfCancellationRequested ();
-#else
-			if (!cancellationToken.CanBeCanceled)
-				return;
-
-			if (Socket != null) {
-				do {
-					cancellationToken.ThrowIfCancellationRequested ();
-					// wait 1/4 second and then re-check for cancellation
-				} while (!Socket.Poll (250000, mode));
-			} else {
-				cancellationToken.ThrowIfCancellationRequested ();
-			}
-#endif
-		}
-
 		async Task<int> ReadAheadAsync (bool doAsync, CancellationToken cancellationToken)
 		{
 			int left = inputEnd - inputIndex;
@@ -293,26 +238,15 @@ namespace MailKit.Net.Smtp {
 			index = inputEnd;
 
 			try {
-#if !NETFX_CORE
-				bool buffered = !(Stream is NetworkStream);
-#else
-				bool buffered = true;
-#endif
+				var network = Stream as NetworkStream;
 
-				if (buffered) {
-					cancellationToken.ThrowIfCancellationRequested ();
+				cancellationToken.ThrowIfCancellationRequested ();
 
-					if (doAsync)
-						nread = await Stream.ReadAsync (input, index, left, cancellationToken).ConfigureAwait (false);
-					else
-						nread = Stream.Read (input, index, left);
+				if (doAsync) {
+					nread = await Stream.ReadAsync (input, index, left, cancellationToken).ConfigureAwait (false);
 				} else {
-					if (doAsync) {
-						nread = await Stream.ReadAsync (input, index, left, cancellationToken).ConfigureAwait (false);
-					} else {
-						Poll (SelectMode.SelectRead, cancellationToken);
-						nread = Stream.Read (input, index, left);
-					}
+					network?.Poll (SelectMode.SelectRead, cancellationToken);
+					nread = Stream.Read (input, index, left);
 				}
 
 				if (nread > 0) {
@@ -580,13 +514,13 @@ namespace MailKit.Net.Smtp {
 				string message = null;
 
 				try {
-#if !NETFX_CORE && !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 					message = UTF8.GetString (memory.GetBuffer (), 0, (int) memory.Length);
 #else
 					message = UTF8.GetString (memory.ToArray (), 0, (int) memory.Length);
 #endif
 				} catch (DecoderFallbackException) {
-#if !NETFX_CORE && !NETSTANDARD
+#if !NETSTANDARD1_3 && !NETSTANDARD1_6
 					message = Latin1.GetString (memory.GetBuffer (), 0, (int) memory.Length);
 #else
 					message = Latin1.GetString (memory.ToArray (), 0, (int) memory.Length);
@@ -653,55 +587,54 @@ namespace MailKit.Net.Smtp {
 
 			ValidateArguments (buffer, offset, count);
 
-			using (var registration = cancellationToken.Register (DropConnection)) {
-				try {
-					int index = offset;
-					int left = count;
+			try {
+				var network = NetworkStream.Get (Stream);
+				int index = offset;
+				int left = count;
 
-					while (left > 0) {
-						int n = Math.Min (BlockSize - outputIndex, left);
+				while (left > 0) {
+					int n = Math.Min (BlockSize - outputIndex, left);
 
-						if (outputIndex > 0 || n < BlockSize) {
-							// append the data to the output buffer
-							Buffer.BlockCopy (buffer, index, output, outputIndex, n);
-							outputIndex += n;
-							index += n;
-							left -= n;
+					if (outputIndex > 0 || n < BlockSize) {
+						// append the data to the output buffer
+						Buffer.BlockCopy (buffer, index, output, outputIndex, n);
+						outputIndex += n;
+						index += n;
+						left -= n;
+					}
+
+					if (outputIndex == BlockSize) {
+						// flush the output buffer
+						if (doAsync) {
+							await Stream.WriteAsync (output, 0, BlockSize, cancellationToken).ConfigureAwait (false);
+						} else {
+							network?.Poll (SelectMode.SelectWrite, cancellationToken);
+							Stream.Write (output, 0, BlockSize);
 						}
+						logger.LogClient (output, 0, BlockSize);
+						outputIndex = 0;
+					}
 
-						if (outputIndex == BlockSize) {
-							// flush the output buffer
+					if (outputIndex == 0) {
+						// write blocks of data to the stream without buffering
+						while (left >= BlockSize) {
 							if (doAsync) {
-								await Stream.WriteAsync (output, 0, BlockSize, cancellationToken).ConfigureAwait (false);
+								await Stream.WriteAsync (buffer, index, BlockSize, cancellationToken).ConfigureAwait (false);
 							} else {
-								Poll (SelectMode.SelectWrite, cancellationToken);
-								Stream.Write (output, 0, BlockSize);
+								network?.Poll (SelectMode.SelectWrite, cancellationToken);
+								Stream.Write (buffer, index, BlockSize);
 							}
-							logger.LogClient (output, 0, BlockSize);
-							outputIndex = 0;
-						}
-
-						if (outputIndex == 0) {
-							// write blocks of data to the stream without buffering
-							while (left >= BlockSize) {
-								if (doAsync) {
-									await Stream.WriteAsync (buffer, index, BlockSize, cancellationToken).ConfigureAwait (false);
-								} else {
-									Poll (SelectMode.SelectWrite, cancellationToken);
-									Stream.Write (buffer, index, BlockSize);
-								}
-								logger.LogClient (buffer, index, BlockSize);
-								index += BlockSize;
-								left -= BlockSize;
-							}
+							logger.LogClient (buffer, index, BlockSize);
+							index += BlockSize;
+							left -= BlockSize;
 						}
 					}
-				} catch (Exception ex) {
-					IsConnected = false;
-					if (!(ex is OperationCanceledException))
-						cancellationToken.ThrowIfCancellationRequested ();
-					throw;
 				}
+			} catch (Exception ex) {
+				IsConnected = false;
+				if (!(ex is OperationCanceledException))
+					cancellationToken.ThrowIfCancellationRequested ();
+				throw;
 			}
 		}
 
@@ -823,24 +756,24 @@ namespace MailKit.Net.Smtp {
 			if (outputIndex == 0)
 				return;
 
-			using (var registration = cancellationToken.Register (DropConnection)) {
-				try {
-					if (doAsync) {
-						await Stream.WriteAsync (output, 0, outputIndex, cancellationToken).ConfigureAwait (false);
-						await Stream.FlushAsync (cancellationToken).ConfigureAwait (false);
-					} else {
-						Poll (SelectMode.SelectWrite, cancellationToken);
-						Stream.Write (output, 0, outputIndex);
-						Stream.Flush ();
-					}
-					logger.LogClient (output, 0, outputIndex);
-					outputIndex = 0;
-				} catch (Exception ex) {
-					IsConnected = false;
-					if (!(ex is OperationCanceledException))
-						cancellationToken.ThrowIfCancellationRequested ();
-					throw;
+			try {
+				if (doAsync) {
+					await Stream.WriteAsync (output, 0, outputIndex, cancellationToken).ConfigureAwait (false);
+					await Stream.FlushAsync (cancellationToken).ConfigureAwait (false);
+				} else {
+					var network = NetworkStream.Get (Stream);
+
+					network?.Poll (SelectMode.SelectWrite, cancellationToken);
+					Stream.Write (output, 0, outputIndex);
+					Stream.Flush ();
 				}
+				logger.LogClient (output, 0, outputIndex);
+				outputIndex = 0;
+			} catch (Exception ex) {
+				IsConnected = false;
+				if (!(ex is OperationCanceledException))
+					cancellationToken.ThrowIfCancellationRequested ();
+				throw;
 			}
 		}
 

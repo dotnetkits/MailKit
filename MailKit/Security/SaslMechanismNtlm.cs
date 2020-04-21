@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -180,7 +180,7 @@ namespace MailKit.Security {
 
 			string userName = Credentials.UserName;
 			string domain = Credentials.Domain;
-			MessageBase message;
+			MessageBase message = null;
 
 			if (string.IsNullOrEmpty (domain)) {
 				int index = userName.IndexOf ('\\');
@@ -203,11 +203,9 @@ namespace MailKit.Security {
 				message = GetChallengeResponse (userName, password, token, startIndex, length);
 				IsAuthenticated = true;
 				break;
-			default:
-				throw new IndexOutOfRangeException ("state");
 			}
 
-			return message.Encode ();
+			return message?.Encode ();
 		}
 
 		MessageBase GetChallengeResponse (string userName, string password, byte[] token, int startIndex, int length)

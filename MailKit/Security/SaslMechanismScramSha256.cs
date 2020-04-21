@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2019 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,21 +26,11 @@
 
 using System;
 using System.Net;
-
-#if __MOBILE__
-using SHA256CryptoServiceProvider = System.Security.Cryptography.SHA256Managed;
-#endif
-
-#if NETFX_CORE
-using Windows.Security.Cryptography;
-using Windows.Security.Cryptography.Core;
-#else
 using System.Security.Cryptography;
-#endif
 
 namespace MailKit.Security {
 	/// <summary>
-	/// The SCRAM-SHA-1 SASL mechanism.
+	/// The SCRAM-SHA-256 SASL mechanism.
 	/// </summary>
 	/// <remarks>
 	/// A salted challenge/response SASL mechanism that uses the HMAC SHA-256 algorithm.
@@ -154,18 +144,8 @@ namespace MailKit.Security {
 		/// <param name="str">The string.</param>
 		protected override byte[] Hash (byte[] str)
 		{
-#if NETFX_CORE
-			var sha256 = HashAlgorithmProvider.OpenAlgorithm (HashAlgorithmNames.Sha256);
-			var buf = sha256.HashData (CryptographicBuffer.CreateFromByteArray (str));
-			byte[] hash;
-
-			CryptographicBuffer.CopyToByteArray (buf, out hash);
-
-			return hash;
-#else
 			using (var sha256 = SHA256.Create ())
 				return sha256.ComputeHash (str);
-#endif
 		}
 	}
 }

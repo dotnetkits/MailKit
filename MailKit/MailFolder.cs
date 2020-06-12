@@ -281,24 +281,9 @@ namespace MailKit {
 		/// argument will throw <see cref="System.NotSupportedException"/> and should not be used.</para>
 		/// </remarks>
 		/// <value><c>true</c> if supports mod-sequences; otherwise, <c>false</c>.</value>
+		[Obsolete ("Use Supports (FolderFeature.ModSequences) instead.")]
 		public bool SupportsModSeq {
-			get; protected set;
-		}
-
-		/// <summary>
-		/// Get whether or not the folder supports quick resynchronization.
-		/// </summary>
-		/// <remarks>
-		/// <para>Gets whether or not the folder supports quick resynchronization.</para>
-		/// <para>If quick resynchronization is supported by the folder, then
-		/// <see cref="Open(FolderAccess, uint, ulong, IList{UniqueId}, CancellationToken)"/> and
-		/// <see cref="OpenAsync(FolderAccess, uint, ulong, IList{UniqueId}, CancellationToken)"/> can
-		/// be used, otherwise they will throw <see cref="System.NotSupportedException"/> and should
-		/// not be used.</para>
-		/// </remarks>
-		/// <value><c>true</c> if supports quick resynchronization; otherwise, <c>false</c>.</value>
-		public abstract bool SupportsQuickResync {
-			get;
+			get { return Supports (FolderFeature.ModSequences); }
 		}
 
 		/// <summary>
@@ -413,6 +398,25 @@ namespace MailKit {
 		public int Count {
 			get; protected set;
 		}
+
+		/// <summary>
+		/// Get the threading algorithms supported by the folder.
+		/// </summary>
+		/// <remarks>
+		/// Get the threading algorithms supported by the folder.
+		/// </remarks>
+		/// <value>The supported threading algorithms.</value>
+		public abstract HashSet<ThreadingAlgorithm> ThreadingAlgorithms { get; }
+
+		/// <summary>
+		/// Determine whether or not a <see cref="MailFolder"/> supports a feature.
+		/// </summary>
+		/// <remarks>
+		/// Determines whether or not a <see cref="MailFolder"/> supports a feature.
+		/// </remarks>
+		/// <param name="feature">The desired feature.</param>
+		/// <returns><c>true</c> if the feature is supported; otherwise, <c>false</c>.</returns>
+		public abstract bool Supports (FolderFeature feature);
 
 		/// <summary>
 		/// Opens the folder using the requested folder access.
@@ -3810,9 +3814,6 @@ namespace MailKit {
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
@@ -3866,9 +3867,6 @@ namespace MailKit {
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
@@ -3920,9 +3918,6 @@ namespace MailKit {
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
@@ -3973,9 +3968,6 @@ namespace MailKit {
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
@@ -4034,8 +4026,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4092,8 +4082,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4151,8 +4139,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4210,8 +4196,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4263,9 +4247,6 @@ namespace MailKit {
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
@@ -4320,9 +4301,6 @@ namespace MailKit {
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
@@ -4374,9 +4352,6 @@ namespace MailKit {
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
 		/// </exception>
@@ -4427,9 +4402,6 @@ namespace MailKit {
 		/// </exception>
 		/// <exception cref="System.OperationCanceledException">
 		/// The operation was canceled via the cancellation token.
-		/// </exception>
-		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
 		/// An I/O error occurred.
@@ -4488,8 +4460,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4546,8 +4516,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4605,8 +4573,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4664,8 +4630,6 @@ namespace MailKit {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The server does not support replacing messages.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">

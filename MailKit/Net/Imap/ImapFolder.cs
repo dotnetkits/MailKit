@@ -50,6 +50,8 @@ namespace MailKit.Net.Imap {
 	/// </example>
 	public partial class ImapFolder : MailFolder, IImapFolder
 	{
+		bool supportsModSeq;
+
 		/// <summary>
 		/// Initializes a new instance of the <see cref="MailKit.Net.Imap.ImapFolder"/> class.
 		/// </summary>
@@ -105,22 +107,6 @@ namespace MailKit.Net.Imap {
 		}
 
 		/// <summary>
-		/// Get whether or not the folder supports quick resynchronization.
-		/// </summary>
-		/// <remarks>
-		/// <para>Gets whether or not the folder supports quick resynchronization.</para>
-		/// <para>If quick resynchronization is supported by the folder, then
-		/// <see cref="Open(FolderAccess, uint, ulong, IList{UniqueId}, CancellationToken)"/> and
-		/// <see cref="OpenAsync(FolderAccess, uint, ulong, IList{UniqueId}, CancellationToken)"/> can
-		/// be used, otherwise they will throw <see cref="System.NotSupportedException"/> and should
-		/// not be used.</para>
-		/// </remarks>
-		/// <value><c>true</c> if supports quick resynchronization; otherwise, <c>false</c>.</value>
-		public override bool SupportsQuickResync {
-			get { return Engine.QResyncEnabled; }
-		}
-
-		/// <summary>
 		/// Gets an object that can be used to synchronize access to the IMAP server.
 		/// </summary>
 		/// <remarks>
@@ -131,6 +117,41 @@ namespace MailKit.Net.Imap {
 		/// <value>The lock object.</value>
 		public override object SyncRoot {
 			get { return Engine; }
+		}
+
+		/// <summary>
+		/// Get the threading algorithms supported by the folder.
+		/// </summary>
+		/// <remarks>
+		/// Get the threading algorithms supported by the folder.
+		/// </remarks>
+		/// <value>The supported threading algorithms.</value>
+		public override HashSet<ThreadingAlgorithm> ThreadingAlgorithms {
+			get { return Engine.ThreadingAlgorithms; }
+		}
+
+		/// <summary>
+		/// Determine whether or not an <see cref="ImapFolder"/> supports a feature.
+		/// </summary>
+		/// <remarks>
+		/// Determines whether or not an <see cref="ImapFolder"/> supports a feature.
+		/// </remarks>
+		/// <param name="feature">The desired feature.</param>
+		/// <returns><c>true</c> if the feature is supported; otherwise, <c>false</c>.</returns>
+		public override bool Supports (FolderFeature feature)
+		{
+			switch (feature) {
+			case FolderFeature.AccessRights: return (Engine.Capabilities & ImapCapabilities.Acl) != 0;
+			case FolderFeature.Annotations: return AnnotationAccess != AnnotationAccess.None;
+			case FolderFeature.Metadata: return (Engine.Capabilities & ImapCapabilities.Metadata) != 0;
+			case FolderFeature.ModSequences: return supportsModSeq;
+			case FolderFeature.QuickResync: return Engine.QResyncEnabled;
+			case FolderFeature.Quotas: return (Engine.Capabilities & ImapCapabilities.Quota) != 0;
+			case FolderFeature.Sorting: return (Engine.Capabilities & ImapCapabilities.Sort) != 0;
+			case FolderFeature.Threading: return (Engine.Capabilities & ImapCapabilities.Thread) != 0;
+			case FolderFeature.UTF8: return Engine.UTF8Enabled;
+			default: return false;
+			}
 		}
 
 		void CheckState (bool open, bool rw)
@@ -173,7 +194,7 @@ namespace MailKit.Net.Imap {
 			MaxAnnotationSize = 0;
 
 			// condstore state
-			SupportsModSeq = false;
+			supportsModSeq = false;
 			HighestModSeq = 0;
 		}
 
@@ -235,14 +256,14 @@ namespace MailKit.Net.Imap {
 					break;
 				case ImapResponseCodeType.HighestModSeq:
 					var highestModSeq = ((HighestModSeqResponseCode) code).HighestModSeq;
-					SupportsModSeq = true;
+					supportsModSeq = true;
 					if (IsOpen)
 						UpdateHighestModSeq (highestModSeq);
 					else
 						HighestModSeq = highestModSeq;
 					break;
 				case ImapResponseCodeType.NoModSeq:
-					SupportsModSeq = false;
+					supportsModSeq = false;
 					HighestModSeq = 0;
 					break;
 				case ImapResponseCodeType.MailboxId:
@@ -352,7 +373,7 @@ namespace MailKit.Net.Imap {
 			if ((Engine.Capabilities & ImapCapabilities.QuickResync) == 0)
 				throw new NotSupportedException ("The IMAP server does not support the QRESYNC extension.");
 
-			if (!SupportsQuickResync)
+			if (!Supports (FolderFeature.QuickResync))
 				throw new InvalidOperationException ("The QRESYNC extension has not been enabled.");
 
 			string qresync;
@@ -917,14 +938,8 @@ namespace MailKit.Net.Imap {
 
 			ProcessResponseCodes (ic, null);
 
-			if (ic.Response != ImapCommandResponse.Ok) {
-				var useAttr = GetResponseCode (ic, ImapResponseCodeType.UseAttr);
-
-				if (useAttr != null)
-					throw new ImapCommandException (ic.Response, useAttr.Message);
-
+			if (ic.Response != ImapCommandResponse.Ok)
 				throw ImapCommandException.Create ("CREATE", ic);
-			}
 
 			var code = (MailboxIdResponseCode) GetResponseCode (ic, ImapResponseCodeType.MailboxId);
 			var id = code?.MailboxId;
@@ -3675,10 +3690,7 @@ namespace MailKit.Net.Imap {
 
 				if (unmark.Count > 0) {
 					// clear the \Deleted flag on all messages except the ones that are to be expunged
-					if (doAsync)
-						await RemoveFlagsAsync (unmark, MessageFlags.Deleted, true, cancellationToken).ConfigureAwait (false);
-					else
-						RemoveFlags (unmark, MessageFlags.Deleted, true, cancellationToken);
+					await ModifyFlagsAsync (unmark, null, MessageFlags.Deleted, null, "-FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
 				}
 
 				// expunge the folder
@@ -3686,10 +3698,7 @@ namespace MailKit.Net.Imap {
 
 				if (unmark.Count > 0) {
 					// restore the \Deleted flags
-					if (doAsync)
-						await AddFlagsAsync (unmark, MessageFlags.Deleted, true, cancellationToken).ConfigureAwait (false);
-					else
-						AddFlags (unmark, MessageFlags.Deleted, true, cancellationToken);
+					await ModifyFlagsAsync (unmark, null, MessageFlags.Deleted, null, "+FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
 				}
 
 				return;
@@ -4660,12 +4669,12 @@ namespace MailKit.Net.Imap {
 			if (date.HasValue)
 				builder.AppendFormat ("\"{0}\" ", ImapUtils.FormatInternalDate (date.Value));
 
-			if (annotations != null && annotations.Count > 0) {
-				ImapUtils.FormatAnnotations (builder, annotations, list, false);
-
-				if (builder[builder.Length - 1] != ' ')
-					builder.Append (' ');
-			}
+			//if (annotations != null && annotations.Count > 0) {
+			//	ImapUtils.FormatAnnotations (builder, annotations, list, false);
+			//
+			//	if (builder[builder.Length - 1] != ' ')
+			//		builder.Append (' ');
+			//}
 
 			builder.Append ("%L\r\n");
 			list.Add (message);
@@ -4694,8 +4703,13 @@ namespace MailKit.Net.Imap {
 
 			CheckState (true, true);
 
-			if ((Engine.Capabilities & ImapCapabilities.Replace) == 0)
-				throw new NotSupportedException ("The IMAP server does not support the REPLACE extension.");
+			if ((Engine.Capabilities & ImapCapabilities.Replace) == 0) {
+				var appended = await AppendAsync (options, message, flags, date, annotations, doAsync, cancellationToken, progress).ConfigureAwait (false);
+				await ModifyFlagsAsync (new[] { uid }, null, MessageFlags.Deleted, null, "+FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
+				if ((Engine.Capabilities & ImapCapabilities.UidPlus) != 0)
+					await ExpungeAsync (new[] { uid }, doAsync, cancellationToken).ConfigureAwait (false);
+				return appended;
+			}
 
 			if (options.International && (Engine.Capabilities & ImapCapabilities.UTF8Accept) == 0)
 				throw new NotSupportedException ("The IMAP server does not support the UTF8 extension.");
@@ -4770,8 +4784,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4831,8 +4843,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4893,8 +4903,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4955,8 +4963,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -4987,12 +4993,12 @@ namespace MailKit.Net.Imap {
 			if (date.HasValue)
 				builder.AppendFormat ("\"{0}\" ", ImapUtils.FormatInternalDate (date.Value));
 
-			if (annotations != null && annotations.Count > 0) {
-				ImapUtils.FormatAnnotations (builder, annotations, list, false);
-
-				if (builder[builder.Length - 1] != ' ')
-					builder.Append (' ');
-			}
+			//if (annotations != null && annotations.Count > 0) {
+			//	ImapUtils.FormatAnnotations (builder, annotations, list, false);
+			//
+			//	if (builder[builder.Length - 1] != ' ')
+			//		builder.Append (' ');
+			//}
 
 			builder.Append ("%L\r\n");
 			list.Add (message);
@@ -5021,8 +5027,11 @@ namespace MailKit.Net.Imap {
 
 			CheckState (true, true);
 
-			if ((Engine.Capabilities & ImapCapabilities.Replace) == 0)
-				throw new NotSupportedException ("The IMAP server does not support the REPLACE extension.");
+			if ((Engine.Capabilities & ImapCapabilities.Replace) == 0) {
+				var uid = await AppendAsync (options, message, flags, date, annotations, doAsync, cancellationToken, progress).ConfigureAwait (false);
+				await ModifyFlagsAsync (new[] { index }, null, MessageFlags.Deleted, null, "+FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
+				return uid;
+			}
 
 			if (options.International && (Engine.Capabilities & ImapCapabilities.UTF8Accept) == 0)
 				throw new NotSupportedException ("The IMAP server does not support the UTF8 extension.");
@@ -5097,8 +5106,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -5158,8 +5165,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -5220,8 +5225,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -5282,8 +5285,6 @@ namespace MailKit.Net.Imap {
 		/// The operation was canceled via the cancellation token.
 		/// </exception>
 		/// <exception cref="System.NotSupportedException">
-		/// <para>The IMAP server does not support the REPLACE extension.</para>
-		/// <para>-or-</para>
 		/// <para>Internationalized formatting was requested but is not supported by the server.</para>
 		/// </exception>
 		/// <exception cref="System.IO.IOException">
@@ -5494,10 +5495,7 @@ namespace MailKit.Net.Imap {
 		{
 			if ((Engine.Capabilities & ImapCapabilities.Move) == 0) {
 				var copied = await CopyToAsync (uids, destination, doAsync, cancellationToken).ConfigureAwait (false);
-				if (doAsync)
-					await AddFlagsAsync (uids, MessageFlags.Deleted, true, cancellationToken).ConfigureAwait (false);
-				else
-					AddFlags (uids, MessageFlags.Deleted, true, cancellationToken);
+				await ModifyFlagsAsync (uids, null, MessageFlags.Deleted, null, "+FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
 				await ExpungeAsync (uids, doAsync, cancellationToken).ConfigureAwait (false);
 				return copied;
 			}
@@ -5820,10 +5818,7 @@ namespace MailKit.Net.Imap {
 		{
 			if ((Engine.Capabilities & ImapCapabilities.Move) == 0) {
 				await CopyToAsync (indexes, destination, doAsync, cancellationToken).ConfigureAwait (false);
-				if (doAsync)
-					await AddFlagsAsync (indexes, MessageFlags.Deleted, true, cancellationToken).ConfigureAwait (false);
-				else
-					AddFlags (indexes, MessageFlags.Deleted, true, cancellationToken);
+				await ModifyFlagsAsync (indexes, null, MessageFlags.Deleted, null, "+FLAGS.SILENT", doAsync, cancellationToken).ConfigureAwait (false);
 				return;
 			}
 

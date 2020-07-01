@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -555,7 +555,7 @@ namespace MailKit.Security {
 			builder.AppendFormat (",digest-uri=\"{0}\"", DigestUri);
 			builder.AppendFormat (",response={0}", Response);
 			if (MaxBuf.HasValue)
-				builder.AppendFormat (",maxbuf={0}", MaxBuf.Value);
+				builder.AppendFormat (CultureInfo.InvariantCulture, ",maxbuf={0}", MaxBuf.Value);
 			if (!string.IsNullOrEmpty (Charset))
 				builder.AppendFormat (",charset={0}", Charset);
 			if (!string.IsNullOrEmpty (Algorithm))

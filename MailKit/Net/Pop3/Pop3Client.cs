@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -249,12 +249,12 @@ namespace MailKit.Net.Pop3 {
 
 		static ProtocolException CreatePop3ParseException (Exception innerException, string format, params object[] args)
 		{
-			return new Pop3ProtocolException (string.Format (format, args), innerException);
+			return new Pop3ProtocolException (string.Format (CultureInfo.InvariantCulture, format, args), innerException);
 		}
 
 		static ProtocolException CreatePop3ParseException (string format, params object[] args)
 		{
-			return new Pop3ProtocolException (string.Format (format, args));
+			return new Pop3ProtocolException (string.Format (CultureInfo.InvariantCulture, format, args));
 		}
 
 		async Task SendCommandAsync (bool doAsync, CancellationToken token, string command)
@@ -836,19 +836,19 @@ namespace MailKit.Net.Pop3 {
 
 			switch (options) {
 			case SecureSocketOptions.StartTlsWhenAvailable:
-				uri = new Uri ("pop://" + host + ":" + port + "/?starttls=when-available");
+				uri = new Uri (string.Format (CultureInfo.InvariantCulture, "pop://{0}:{1}/?starttls=when-available", host, port));
 				starttls = true;
 				break;
 			case SecureSocketOptions.StartTls:
-				uri = new Uri ("pop://" + host + ":" + port + "/?starttls=always");
+				uri = new Uri (string.Format (CultureInfo.InvariantCulture, "pop://{0}:{1}/?starttls=always", host, port));
 				starttls = true;
 				break;
 			case SecureSocketOptions.SslOnConnect:
-				uri = new Uri ("pops://" + host + ":" + port);
+				uri = new Uri (string.Format (CultureInfo.InvariantCulture, "pops://{0}:{1}", host, port));
 				starttls = false;
 				break;
 			default:
-				uri = new Uri ("pop://" + host + ":" + port);
+				uri = new Uri (string.Format (CultureInfo.InvariantCulture, "pop://{0}:{1}", host, port));
 				starttls = false;
 				break;
 			}

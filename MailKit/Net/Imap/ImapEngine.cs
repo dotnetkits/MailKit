@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -540,7 +540,7 @@ namespace MailKit.Net.Imap {
 
 		internal static ImapProtocolException UnexpectedToken (string format, params object[] args)
 		{
-			return new ImapProtocolException (string.Format (format, args)) { UnexpectedToken = true };
+			return new ImapProtocolException (string.Format (CultureInfo.InvariantCulture, format, args)) { UnexpectedToken = true };
 		}
 
 		internal static void AssertToken (ImapToken token, ImapTokenType type, string format, params object[] args)

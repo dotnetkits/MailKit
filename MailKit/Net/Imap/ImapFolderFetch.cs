@@ -3,7 +3,7 @@
 //
 // Author: Jeffrey Stedfast <jestedfa@microsoft.com>
 //
-// Copyright (c) 2013-2020 Xamarin Inc. (www.xamarin.com)
+// Copyright (c) 2013-2020 .NET Foundation and Contributors
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -2475,7 +2475,7 @@ namespace MailKit.Net.Imap
 
 			var maxValue = max != -1 ? (max + 1).ToString (CultureInfo.InvariantCulture) : "*";
 
-			return string.Format ("{0}:{1}", minValue, maxValue);
+			return string.Format (CultureInfo.InvariantCulture, "{0}:{1}", minValue, maxValue);
 		}
 
 		async Task<IList<IMessageSummary>> FetchAsync (int min, int max, MessageSummaryItems items, bool doAsync, CancellationToken cancellationToken)
